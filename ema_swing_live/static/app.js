@@ -355,7 +355,7 @@ $("limitOrderForm").addEventListener("submit", async (event) => {
         limit_price: $("limitPrice").value,
         validity: $("limitValidity").value,
         dry_run: dryRun,
-        user_remark: "ema_swing",
+        user_remark: "emaswing",
       }),
     });
     $("limitOrderResult").textContent = JSON.stringify(payload.order, null, 2);

@@ -76,3 +76,15 @@ def test_limit_dry_run_does_not_require_credentials():
     assert result["dry_run"] is True
     assert result["payload"]["stock_code"] == "GOLDEX"
     assert result["response"] is None
+
+
+def test_limit_user_remark_is_alphanumeric_only():
+    payload = icici.build_limit_order_payload(
+        symbol="GOLDEX",
+        side="BUY",
+        quantity=1,
+        limit_price=70,
+        user_remark="ema_swing-1!",
+    )
+
+    assert payload["user_remark"] == "emaswing1"

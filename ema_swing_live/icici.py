@@ -383,7 +383,7 @@ def _user_remark(value: str) -> str:
     text = str(value or "").strip()
     if not text:
         return ""
-    cleaned = "".join(ch for ch in text if ch.isalnum() or ch in {"_", "-"})
+    cleaned = "".join(ch for ch in text if ch.isalnum())
     return cleaned[:20]
 
 
