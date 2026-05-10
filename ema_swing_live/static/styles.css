@@ -232,7 +232,7 @@ label {
 
 .action-card {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(160px, 1fr) minmax(280px, 1.4fr) auto auto;
   gap: 12px;
   align-items: center;
   padding: 12px;
@@ -248,6 +248,82 @@ label {
 .action-card span {
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.action-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(74px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.action-controls input,
+.action-controls select {
+  min-height: 38px;
+  padding: 8px;
+}
+
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.action-buttons button {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.mini-check {
+  min-height: 38px;
+  gap: 6px;
+}
+
+.soft-status {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 0 9px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  background: #eef4f3;
+  color: var(--primary);
+}
+
+.status-pill.bad {
+  background: #faecee;
+  color: var(--danger);
+}
+
+.status-pill.ok {
+  background: #e8f3ee;
+  color: var(--primary-strong);
+}
+
+.compact-result {
+  max-height: 220px;
+}
+
+.editable-table input,
+.editable-table select {
+  min-width: 110px;
+  padding: 7px 8px;
+}
+
+.editable-table button {
+  min-height: 34px;
+}
+
+.button-row.tight {
+  grid-column: auto;
+  justify-content: flex-end;
 }
 
 .side-buy {
@@ -356,10 +432,18 @@ tr:last-child td {
   }
 
   .action-card {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: 1fr;
+  }
+
+  .action-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .action-buttons button {
+    flex: 1 1 auto;
   }
 
   .action-card .value {
-    grid-column: 2;
+    grid-column: auto;
   }
 }

@@ -129,19 +129,15 @@ References:
 - ICICI Direct Breeze API page: https://www.icicidirect.com/futures-and-options/api/breeze
 - Breeze API reference: https://api.icicidirect.com/breezeapi/documents/index.html
 
-## ICICI GTT Order Test
+## ICICI Trading Workflow
 
-The dashboard has an `ICICI GTT Order` panel for single-leg GTT payload checks. Keep `Dry run` checked for NSE ETF/cash symbols; this builds and displays the Breeze payload without sending it.
+The dashboard places regular ICICI Breeze limit orders directly from generated 9 EMA actions. Run signals, review the generated actions, choose `Cash` or `MTF`, adjust quantity/limit price if needed, then use `Preview` before `Place`.
 
-For strategy actions, run signals, select one action, then click `Use Selected Action` to copy symbol, side, quantity, and signal price into the GTT form. `NSE:GOLDBEES` is resolved through the ICICI alias file to `GOLDEX`; direct Breeze stock codes like `GOLDEX` also work.
+Successful broker responses are recorded in the local broker order log, and the action can be booked into the strategy ledger automatically. The broker order book can be refreshed from the dashboard.
 
-On May 10, 2026, ICICI Breeze rejected a real `NSE` cash GTT request with `Exchange-code should be 'nfo'.` The app therefore blocks real NSE ETF/cash GTT placement through this API path and leaves dry-run enabled for payload validation. Place cash/ETF GTT orders manually in ICICI Direct unless ICICI enables this Breeze API segment for your account.
+Strategy holdings and the booked order ledger are editable from the dashboard. Save manual edits before the next signal run so the strategy sees the updated state.
 
-## ICICI Limit Order Test
-
-Use the `ICICI Limit Order` panel for regular Breeze `OrderPlacement` orders. The Breeze docs list `POST /breezeapi/api/v1/order` for `NSE` cash with `order_type=limit`; the installed Breeze SDK also accepts `mtf` as a product type. Market orders are not permitted. Keep `Dry run` checked first to inspect the payload, then uncheck it only when you intentionally want to place the order.
-
-On holidays or outside market hours, ICICI may reject a regular day order depending on exchange/session rules. Use a very small quantity and a safe limit price when testing real placement. MTF acceptance also depends on account eligibility, stock eligibility, and available margin.
+ICICI Breeze rejected real NSE cash/ETF GTT placement with `Exchange-code should be 'nfo'.` The app keeps GTT helpers on the backend for reference but the live ETF workflow uses regular `OrderPlacement` limit orders. MTF acceptance depends on account eligibility, stock eligibility, and available margin.
 
 ## Data Provider
 

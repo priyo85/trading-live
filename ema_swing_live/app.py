@@ -9,14 +9,18 @@ from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
+from uuid import uuid4
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
 from backtesting.etf_backtester.config.etf_universe import ETF_UNIVERSE
-from backtesting.etf_backtester.live.signal_runner import LIVE_CONFIG_PATH, clear_live_ledger, run_live_signals
-from backtesting.etf_backtester.live.state import LIVE_REPORT_PATH
+from backtesting.etf_backtester.live.signal_runner import LIVE_CONFIG_PATH, _apply_actions, clear_live_ledger, run_live_signals
+from backtesting.etf_backtester.live.state import LIVE_REPORT_PATH, LIVE_STATE_PATH, load_live_state, save_live_state
 from ema_swing_live import icici
-from ema_swing_live.storage import INSTANCE_DIR, load_settings, save_json, save_settings
+from ema_swing_live.storage import INSTANCE_DIR, load_json, load_settings, save_json, save_settings
+
+
+BROKER_ORDERS_PATH = INSTANCE_DIR / "broker_orders.json"
 
 
 def create_app() -> Flask:
@@ -62,6 +66,8 @@ def create_app() -> Flask:
                 "settings": load_settings(),
                 "icici": icici.credentials_status(),
                 "live_config": _load_live_config(),
+                "live_state": _load_live_state(),
+                "broker_orders": _load_broker_orders(),
                 "report": _load_latest_report(),
             }
         )
@@ -144,6 +150,42 @@ def create_app() -> Flask:
         except Exception as exc:
             return jsonify({"error": f"Live ledger clear failed: {exc}"}), 500
         return jsonify({"state": state, "report": None})
+
+    @app.get("/api/live/state")
+    @_login_required
+    def api_live_state():
+        return jsonify({"state": _load_live_state()})
+
+    @app.put("/api/live/state")
+    @_login_required
+    def api_live_state_update():
+        payload = request.get_json(silent=True) or {}
+        try:
+            state = _normalize_live_state(payload)
+            save_live_state(state, LIVE_STATE_PATH)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"Live state update failed: {exc}"}), 500
+        return jsonify({"state": state})
+
+    @app.post("/api/live/book-action")
+    @_login_required
+    def api_live_book_action():
+        payload = request.get_json(silent=True) or {}
+        try:
+            state = _book_report_action(
+                action_id=str(payload.get("action_id", "")),
+                quantity=payload.get("quantity"),
+                price=payload.get("price"),
+                product=str(payload.get("product", "cash")),
+                broker_order_id=str(payload.get("broker_order_id", "")),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"Live action booking failed: {exc}"}), 500
+        return jsonify({"state": state})
 
     @app.get("/api/icici/status")
     @_login_required
@@ -232,6 +274,50 @@ def create_app() -> Flask:
         except Exception as exc:
             return jsonify({"error": f"ICICI limit order failed: {exc}"}), 500
         return jsonify({"order": order})
+
+    @app.post("/api/icici/action-order")
+    @_login_required
+    def api_icici_action_order():
+        payload = request.get_json(silent=True) or {}
+        try:
+            report_action = _report_action(str(payload.get("action_id", "")))
+            dry_run = bool(payload.get("dry_run", True))
+            product = str(payload.get("product", report_action.get("funding_mode", "delivery")))
+            if product == "delivery":
+                product = "cash"
+            quantity = payload.get("quantity", report_action.get("shares", ""))
+            price = payload.get("price", report_action.get("price", ""))
+            order = icici.place_limit_order(
+                symbol=str(report_action.get("symbol", "")),
+                side=str(report_action.get("side", "")),
+                quantity=quantity,
+                limit_price=price,
+                product=product,
+                dry_run=dry_run,
+                validity=str(payload.get("validity", "day")),
+                user_remark="emaswing",
+            )
+            entry = _record_broker_order(report_action, order, product=product, quantity=quantity, price=price)
+            booked_state = None
+            if order.get("ok") and not dry_run and bool(payload.get("book_on_success", True)):
+                broker_order_id = _broker_order_id(order.get("response"))
+                booked_state = _book_report_action(
+                    action_id=str(report_action.get("id", "")),
+                    quantity=quantity,
+                    price=price,
+                    product=product,
+                    broker_order_id=broker_order_id,
+                )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"ICICI action order failed: {exc}"}), 500
+        return jsonify({"order": order, "broker_order": entry, "broker_orders": _load_broker_orders(), "state": booked_state})
+
+    @app.get("/api/broker/orders")
+    @_login_required
+    def api_broker_orders():
+        return jsonify({"broker_orders": _load_broker_orders()})
 
     @app.get("/api/icici/order/book")
     @_login_required
@@ -325,6 +411,196 @@ def _load_latest_report() -> dict[str, Any] | None:
     if not isinstance(report, dict):
         raise ValueError(f"Expected live report object in {LIVE_REPORT_PATH}")
     return report
+
+
+def _load_live_state() -> dict[str, Any]:
+    config = _load_live_config()
+    return load_live_state(LIVE_STATE_PATH, initial_capital=float(config.get("initial_capital", 0)))
+
+
+def _load_broker_orders() -> list[dict[str, Any]]:
+    data = load_json(BROKER_ORDERS_PATH, {"orders": []})
+    orders = data.get("orders", [])
+    return orders if isinstance(orders, list) else []
+
+
+def _save_broker_orders(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    save_json(BROKER_ORDERS_PATH, {"orders": orders[-200:]})
+    return orders[-200:]
+
+
+def _record_broker_order(action: dict[str, Any], order: dict[str, Any], product: str, quantity: Any, price: Any) -> dict[str, Any]:
+    response = order.get("response") if isinstance(order, dict) else {}
+    entry = {
+        "id": uuid4().hex,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "action_id": action.get("id", ""),
+        "symbol": action.get("symbol", ""),
+        "side": action.get("side", ""),
+        "product": product,
+        "quantity": _positive_number(quantity, "Quantity"),
+        "price": _positive_number(price, "Price"),
+        "dry_run": bool(order.get("dry_run", True)),
+        "ok": bool(order.get("ok")),
+        "broker_order_id": _broker_order_id(response),
+        "message": _broker_order_message(response),
+        "payload": order.get("payload"),
+        "response": response,
+    }
+    orders = _load_broker_orders()
+    orders.append(entry)
+    _save_broker_orders(orders)
+    return entry
+
+
+def _broker_order_id(response: Any) -> str:
+    if not isinstance(response, dict):
+        return ""
+    success = response.get("Success")
+    if isinstance(success, dict):
+        return str(success.get("order_id", "")).strip()
+    return ""
+
+
+def _broker_order_message(response: Any) -> str:
+    if not isinstance(response, dict):
+        return str(response or "")
+    if response.get("Error"):
+        return str(response.get("Error"))
+    success = response.get("Success")
+    if isinstance(success, dict):
+        return str(success.get("message") or success.get("order_id") or "")
+    return str(response.get("Status", ""))
+
+
+def _report_action(action_id: str) -> dict[str, Any]:
+    report = _load_latest_report()
+    if not report:
+        raise ValueError("Run signals before placing action orders.")
+    for action in report.get("actions", []):
+        if str(action.get("id", "")) == action_id:
+            return dict(action)
+    raise ValueError("Action was not found in the latest signal report.")
+
+
+def _book_report_action(action_id: str, quantity: Any, price: Any, product: str, broker_order_id: str = "") -> dict[str, Any]:
+    action = _report_action(action_id)
+    config = _load_live_config()
+    state = _load_live_state()
+    booked = _action_with_order_values(action, state, quantity=quantity, price=price, product=product, broker_order_id=broker_order_id)
+    _apply_actions(state, [booked], config)
+    save_live_state(state, LIVE_STATE_PATH)
+    return state
+
+
+def _action_with_order_values(action: dict[str, Any], state: dict[str, Any], quantity: Any, price: Any, product: str, broker_order_id: str) -> dict[str, Any]:
+    booked = dict(action)
+    shares = int(_positive_number(quantity if quantity is not None else action.get("shares"), "Quantity"))
+    order_price = _positive_number(price if price is not None else action.get("price"), "Price")
+    value = shares * order_price
+    funding_mode = "mtf" if str(product).strip().lower() == "mtf" else "delivery"
+    booked.update(
+        {
+            "shares": shares,
+            "price": order_price,
+            "value": value,
+            "broker_order_id": broker_order_id,
+            "funding_mode": funding_mode,
+            "mtf_loan": value if funding_mode == "mtf" and booked.get("side") == "BUY" else 0.0,
+            "cash_required": 0.0 if funding_mode == "mtf" and booked.get("side") == "BUY" else value,
+        }
+    )
+    if booked.get("side") == "SELL":
+        holding = state.get("holdings", {}).get(booked.get("symbol"), {})
+        mtf_loan = float(holding.get("mtf_loan", 0) or 0)
+        cost_basis = float(holding.get("cost_basis", shares * float(holding.get("entry_price", order_price))) or 0)
+        booked["mtf_loan_repayment"] = mtf_loan
+        booked["cash_delta"] = value - mtf_loan
+        booked["profit"] = value - cost_basis
+    return booked
+
+
+def _normalize_live_state(payload: dict[str, Any]) -> dict[str, Any]:
+    current = _load_live_state()
+    state = dict(current)
+    state["cash"] = float(payload.get("cash", current.get("cash", 0)) or 0)
+    state["holdings"] = _normalize_holdings(payload.get("holdings", current.get("holdings", {})))
+    state["trades"] = _normalize_trades(payload.get("trades", current.get("trades", [])))
+    state["completed_trades"] = []
+    state.setdefault("capital_adjustments", current.get("capital_adjustments", []))
+    state.setdefault("created_at", current.get("created_at", datetime.now().isoformat(timespec="seconds")))
+    return state
+
+
+def _normalize_holdings(value: Any) -> dict[str, Any]:
+    rows = value.values() if isinstance(value, dict) else value
+    if not isinstance(rows, list) and not hasattr(rows, "__iter__"):
+        raise ValueError("Holdings must be a list or object.")
+    holdings: dict[str, Any] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol", "")).strip().upper()
+        if not symbol:
+            continue
+        shares = int(_positive_number(row.get("shares"), f"{symbol} shares"))
+        entry_price = _positive_number(row.get("entry_price"), f"{symbol} entry price")
+        funding_mode = str(row.get("funding_mode", "delivery")).strip().lower()
+        if funding_mode not in {"delivery", "mtf"}:
+            funding_mode = "delivery"
+        holdings[symbol] = {
+            "symbol": symbol,
+            "shares": shares,
+            "entry_price": entry_price,
+            "entry_date": str(row.get("entry_date", "")).strip() or datetime.now().date().isoformat(),
+            "cost_basis": float(row.get("cost_basis", shares * entry_price) or shares * entry_price),
+            "funding_mode": funding_mode,
+            "mtf_loan": float(row.get("mtf_loan", 0) or 0),
+        }
+    return holdings
+
+
+def _normalize_trades(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ValueError("Booked ledger must be a list.")
+    trades: list[dict[str, Any]] = []
+    for row in value:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol", "")).strip().upper()
+        side = str(row.get("side", "")).strip().upper()
+        if not symbol or side not in {"BUY", "SELL"}:
+            continue
+        shares = int(_positive_number(row.get("shares"), f"{symbol} ledger shares"))
+        price = _positive_number(row.get("price"), f"{symbol} ledger price")
+        trade = dict(row)
+        trade.update(
+            {
+                "id": str(row.get("id") or f"MANUAL_{uuid4().hex[:10]}"),
+                "symbol": symbol,
+                "side": side,
+                "shares": shares,
+                "price": price,
+                "value": float(row.get("value", shares * price) or shares * price),
+                "date": str(row.get("date", "")).strip() or datetime.now().date().isoformat(),
+                "signal_date": str(row.get("signal_date", row.get("date", ""))).strip() or datetime.now().date().isoformat(),
+                "reason": str(row.get("reason", "manual")),
+                "funding_mode": str(row.get("funding_mode", "delivery")).strip().lower(),
+                "broker_order_id": str(row.get("broker_order_id", "")).strip(),
+            }
+        )
+        trades.append(trade)
+    return trades
+
+
+def _positive_number(value: Any, label: str) -> float:
+    try:
+        parsed = float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a positive number.") from None
+    if parsed <= 0:
+        raise ValueError(f"{label} must be a positive number.")
+    return parsed
 
 
 def _normalize_symbols(value: Any) -> list[str]:
