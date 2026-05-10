@@ -9,6 +9,11 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+function on(id, eventName, handler) {
+  const node = $(id);
+  if (node) node.addEventListener(eventName, handler);
+}
+
 function money(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return Number(value).toLocaleString("en-IN", { maximumFractionDigits: 2 });
@@ -327,7 +332,7 @@ async function load() {
   renderStatus(payload);
 }
 
-$("runSignals").addEventListener("click", async () => {
+on("runSignals", "click", async () => {
   setMessage("Running live signals...");
   try {
     const payload = await api("/api/live/run", {
@@ -345,11 +350,11 @@ $("runSignals").addEventListener("click", async () => {
   }
 });
 
-$("refreshOrderBook").addEventListener("click", () => {
+on("refreshOrderBook", "click", () => {
   refreshBrokerOrderBook().catch((error) => setMessage(error.message, true));
 });
 
-$("clearLedger").addEventListener("click", async () => {
+on("clearLedger", "click", async () => {
   if (!confirm("Clear the local strategy ledger?")) return;
   try {
     const payload = await api("/api/live/clear", { method: "POST", body: JSON.stringify({}) });
@@ -362,7 +367,7 @@ $("clearLedger").addEventListener("click", async () => {
   }
 });
 
-$("configForm").addEventListener("submit", async (event) => {
+on("configForm", "submit", async (event) => {
   event.preventDefault();
   setMessage("Saving configuration...");
   try {
@@ -384,7 +389,7 @@ $("configForm").addEventListener("submit", async (event) => {
   }
 });
 
-$("openIciciLogin").addEventListener("click", async () => {
+on("openIciciLogin", "click", async () => {
   try {
     const payload = await api("/api/icici/login-url", {
       method: "POST",
@@ -396,7 +401,7 @@ $("openIciciLogin").addEventListener("click", async () => {
   }
 });
 
-$("iciciForm").addEventListener("submit", async (event) => {
+on("iciciForm", "submit", async (event) => {
   event.preventDefault();
   $("iciciResult").textContent = "Testing...";
   try {
@@ -415,7 +420,7 @@ $("iciciForm").addEventListener("submit", async (event) => {
   }
 });
 
-$("testIciciQuote").addEventListener("click", async () => {
+on("testIciciQuote", "click", async () => {
   $("iciciResult").textContent = "Testing...";
   try {
     const payload = await api("/api/icici/test", {
@@ -428,7 +433,7 @@ $("testIciciQuote").addEventListener("click", async () => {
   }
 });
 
-$("actionsList").addEventListener("click", (event) => {
+on("actionsList", "click", (event) => {
   const card = event.target.closest(".trade-action");
   if (!card) return;
   if (event.target.matches("[data-preview-order]")) {
@@ -448,20 +453,21 @@ document.body.addEventListener("click", (event) => {
   }
 });
 
-$("addHolding").addEventListener("click", () => {
+on("addHolding", "click", () => {
   $("holdingsBody").insertAdjacentHTML("beforeend", holdingRow({ entry_date: new Date().toISOString().slice(0, 10), funding_mode: "delivery" }, {}));
 });
 
-$("saveHoldings").addEventListener("click", () => {
+on("saveHoldings", "click", () => {
   saveLiveState({ holdings: serializeHoldings() }).catch((error) => setMessage(error.message, true));
 });
 
-$("addLedgerTrade").addEventListener("click", () => {
+on("addLedgerTrade", "click", () => {
   $("ledgerBody").insertAdjacentHTML("beforeend", ledgerRow({ date: new Date().toISOString().slice(0, 10), side: "BUY", funding_mode: "delivery", reason: "manual" }));
 });
 
-$("saveLedger").addEventListener("click", () => {
+on("saveLedger", "click", () => {
   saveLiveState({ trades: serializeLedger() }).catch((error) => setMessage(error.message, true));
 });
 
+setMessage("Dashboard ready.");
 load().catch((error) => setMessage(error.message, true));
