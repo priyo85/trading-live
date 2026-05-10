@@ -16,6 +16,7 @@ from ema_swing_live.storage import INSTANCE_DIR, load_json, mask_value, save_jso
 CREDENTIALS_PATH = Path(os.getenv("ICICI_BREEZE_CREDENTIALS_PATH", INSTANCE_DIR / "icici_breeze_credentials.json"))
 LOGIN_BASE_URL = "https://api.icicidirect.com/apiuser/login?api_key="
 GTT_DEFAULT_DAYS = int(os.getenv("ICICI_BREEZE_GTT_DEFAULT_DAYS", "365"))
+GTT_SUPPORTED_EXCHANGES = {"NFO"}
 
 
 @dataclass(frozen=True)
@@ -198,6 +199,7 @@ def place_gtt_single_leg_order(
     )
     if dry_run:
         return {"ok": True, "dry_run": True, "payload": payload, "response": None}
+    _validate_real_gtt_payload(payload)
 
     response = _client(credentials).gtt_single_leg_place_order(**payload)
     return {"ok": _response_ok(response), "dry_run": False, "payload": payload, "response": _safe_response(response)}
@@ -299,6 +301,16 @@ def _response_ok(response: Any) -> bool:
     error = response.get("Error")
     status = str(response.get("Status", "")).strip().lower()
     return not error and status not in {"error", "failed", "failure"}
+
+
+def _validate_real_gtt_payload(payload: dict[str, Any]) -> None:
+    exchange_code = str(payload.get("exchange_code", "")).strip().upper()
+    if exchange_code not in GTT_SUPPORTED_EXCHANGES:
+        raise ValueError(
+            "ICICI Breeze rejected NSE cash GTT orders with: Exchange-code should be 'nfo'. "
+            "Use dry run only for NSE ETFs/cash, or place the cash GTT from ICICI Direct manually. "
+            "This API path is enabled only for NFO GTT orders."
+        )
 
 
 def _safe_response(response: Any) -> Any:

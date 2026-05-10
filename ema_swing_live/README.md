@@ -131,11 +131,11 @@ References:
 
 ## ICICI GTT Order Test
 
-The dashboard has an `ICICI GTT Order` panel for single-leg GTT orders. Keep `Dry run` checked first; this builds and displays the Breeze payload without sending it. Untick `Dry run` only after checking symbol, side, quantity, trigger, and limit price.
+The dashboard has an `ICICI GTT Order` panel for single-leg GTT payload checks. Keep `Dry run` checked for NSE ETF/cash symbols; this builds and displays the Breeze payload without sending it.
 
 For strategy actions, run signals, select one action, then click `Use Selected Action` to copy symbol, side, quantity, and signal price into the GTT form. `NSE:GOLDBEES` is resolved through the ICICI alias file to `GOLDEX`; direct Breeze stock codes like `GOLDEX` also work.
 
-On market holidays, regular day orders are not useful for an execution test. A dry-run GTT preview is safest, and a real GTT request can test broker-side order acceptance if the session token is valid and the trigger/limit values satisfy ICICI rules.
+On May 10, 2026, ICICI Breeze rejected a real `NSE` cash GTT request with `Exchange-code should be 'nfo'.` The app therefore blocks real NSE ETF/cash GTT placement through this API path and leaves dry-run enabled for payload validation. Place cash/ETF GTT orders manually in ICICI Direct unless ICICI enables this Breeze API segment for your account.
 
 ## Data Provider
 
