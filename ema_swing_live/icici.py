@@ -17,6 +17,7 @@ CREDENTIALS_PATH = Path(os.getenv("ICICI_BREEZE_CREDENTIALS_PATH", INSTANCE_DIR 
 LOGIN_BASE_URL = "https://api.icicidirect.com/apiuser/login?api_key="
 GTT_DEFAULT_DAYS = int(os.getenv("ICICI_BREEZE_GTT_DEFAULT_DAYS", "365"))
 GTT_SUPPORTED_EXCHANGES = {"NFO"}
+LIMIT_ORDER_PRODUCTS = {"cash", "mtf"}
 
 
 @dataclass(frozen=True)
@@ -159,7 +160,7 @@ def build_limit_order_payload(
     return {
         "stock_code": instrument.stock_code,
         "exchange_code": (exchange_code or instrument.exchange_code or "NSE").upper(),
-        "product": (product or instrument.product_type or "cash").lower(),
+        "product": _limit_order_product(product or instrument.product_type or "cash"),
         "action": _side(side).lower(),
         "order_type": "limit",
         "stoploss": "",
@@ -376,6 +377,13 @@ def _validity(value: str) -> str:
     normalized = str(value or "day").strip().lower()
     if normalized not in {"day", "ioc"}:
         raise ValueError("Validity must be day or ioc.")
+    return normalized
+
+
+def _limit_order_product(value: str) -> str:
+    normalized = str(value or "cash").strip().lower()
+    if normalized not in LIMIT_ORDER_PRODUCTS:
+        raise ValueError("Limit order product must be cash or mtf.")
     return normalized
 
 

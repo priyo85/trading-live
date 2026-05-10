@@ -223,6 +223,7 @@ def create_app() -> Flask:
                 quantity=payload.get("quantity", ""),
                 limit_price=payload.get("limit_price", ""),
                 dry_run=bool(payload.get("dry_run", True)),
+                product=str(payload.get("product", "cash")),
                 validity=str(payload.get("validity", "day")),
                 user_remark=str(payload.get("user_remark", "")),
             )

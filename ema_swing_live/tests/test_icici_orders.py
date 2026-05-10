@@ -88,3 +88,15 @@ def test_limit_user_remark_is_alphanumeric_only():
     )
 
     assert payload["user_remark"] == "emaswing1"
+
+
+def test_limit_payload_supports_mtf_product():
+    payload = icici.build_limit_order_payload(
+        symbol="GOLDEX",
+        side="BUY",
+        quantity=1,
+        limit_price=70,
+        product="mtf",
+    )
+
+    assert payload["product"] == "mtf"

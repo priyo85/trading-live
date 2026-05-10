@@ -139,9 +139,9 @@ On May 10, 2026, ICICI Breeze rejected a real `NSE` cash GTT request with `Excha
 
 ## ICICI Limit Order Test
 
-Use the `ICICI Limit Order` panel for regular Breeze `OrderPlacement` cash orders. The Breeze docs list `POST /breezeapi/api/v1/order` for `NSE` cash with `order_type=limit`; market orders are not permitted. Keep `Dry run` checked first to inspect the payload, then uncheck it only when you intentionally want to place the order.
+Use the `ICICI Limit Order` panel for regular Breeze `OrderPlacement` orders. The Breeze docs list `POST /breezeapi/api/v1/order` for `NSE` cash with `order_type=limit`; the installed Breeze SDK also accepts `mtf` as a product type. Market orders are not permitted. Keep `Dry run` checked first to inspect the payload, then uncheck it only when you intentionally want to place the order.
 
-On holidays or outside market hours, ICICI may reject a regular day order depending on exchange/session rules. Use a very small quantity and a safe limit price when testing real placement.
+On holidays or outside market hours, ICICI may reject a regular day order depending on exchange/session rules. Use a very small quantity and a safe limit price when testing real placement. MTF acceptance also depends on account eligibility, stock eligibility, and available margin.
 
 ## Data Provider
 

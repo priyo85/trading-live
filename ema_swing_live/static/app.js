@@ -353,6 +353,7 @@ $("limitOrderForm").addEventListener("submit", async (event) => {
         side: $("limitSide").value,
         quantity: $("limitQuantity").value,
         limit_price: $("limitPrice").value,
+        product: $("limitProduct").value,
         validity: $("limitValidity").value,
         dry_run: dryRun,
         user_remark: "emaswing",
