@@ -137,6 +137,12 @@ For strategy actions, run signals, select one action, then click `Use Selected A
 
 On May 10, 2026, ICICI Breeze rejected a real `NSE` cash GTT request with `Exchange-code should be 'nfo'.` The app therefore blocks real NSE ETF/cash GTT placement through this API path and leaves dry-run enabled for payload validation. Place cash/ETF GTT orders manually in ICICI Direct unless ICICI enables this Breeze API segment for your account.
 
+## ICICI Limit Order Test
+
+Use the `ICICI Limit Order` panel for regular Breeze `OrderPlacement` cash orders. The Breeze docs list `POST /breezeapi/api/v1/order` for `NSE` cash with `order_type=limit`; market orders are not permitted. Keep `Dry run` checked first to inspect the payload, then uncheck it only when you intentionally want to place the order.
+
+On holidays or outside market hours, ICICI may reject a regular day order depending on exchange/session rules. Use a very small quantity and a safe limit price when testing real placement.
+
 ## Data Provider
 
 The dashboard provider selector controls `ETF_DATA_PROVIDER` for live runs:

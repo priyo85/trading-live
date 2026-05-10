@@ -326,4 +326,56 @@ $("refreshGttBook").addEventListener("click", async () => {
   }
 });
 
+$("fillLimitFromSelected").addEventListener("click", () => {
+  const action = firstSelectedAction();
+  if (!action) {
+    setMessage("Select one action first.", true);
+    return;
+  }
+  $("limitSymbol").value = action.symbol || "";
+  $("limitSide").value = action.side || "BUY";
+  $("limitQuantity").value = action.shares || 1;
+  $("limitPrice").value = action.price ? Number(action.price).toFixed(2) : "";
+  setMessage("Selected action copied into the limit order form.");
+});
+
+$("limitOrderForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dryRun = $("limitDryRun").checked;
+  if (!dryRun && !confirm("Place this ICICI limit order?")) return;
+
+  $("limitOrderResult").textContent = dryRun ? "Preparing preview..." : "Placing limit order...";
+  try {
+    const payload = await api("/api/icici/order/limit", {
+      method: "POST",
+      body: JSON.stringify({
+        symbol: $("limitSymbol").value,
+        side: $("limitSide").value,
+        quantity: $("limitQuantity").value,
+        limit_price: $("limitPrice").value,
+        validity: $("limitValidity").value,
+        dry_run: dryRun,
+        user_remark: "ema_swing",
+      }),
+    });
+    $("limitOrderResult").textContent = JSON.stringify(payload.order, null, 2);
+    setMessage(dryRun ? "Limit order preview ready." : "Limit order request sent to ICICI.");
+  } catch (error) {
+    $("limitOrderResult").textContent = error.message;
+    setMessage(error.message, true);
+  }
+});
+
+$("refreshOrderBook").addEventListener("click", async () => {
+  $("limitOrderResult").textContent = "Loading order book...";
+  try {
+    const payload = await api("/api/icici/order/book");
+    $("limitOrderResult").textContent = JSON.stringify(payload.orders, null, 2);
+    setMessage("Order book loaded.");
+  } catch (error) {
+    $("limitOrderResult").textContent = error.message;
+    setMessage(error.message, true);
+  }
+});
+
 load().catch((error) => setMessage(error.message, true));

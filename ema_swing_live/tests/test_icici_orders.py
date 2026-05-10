@@ -41,3 +41,38 @@ def test_gtt_dry_run_does_not_require_credentials():
     assert result["dry_run"] is True
     assert result["payload"]["stock_code"] == "GOLDEX"
     assert result["response"] is None
+
+
+def test_limit_payload_resolves_etf_alias_without_network():
+    payload = icici.build_limit_order_payload(
+        symbol="NSE:GOLDBEES",
+        side="BUY",
+        quantity="2",
+        limit_price="70.5",
+    )
+
+    assert payload["exchange_code"] == "NSE"
+    assert payload["stock_code"] == "GOLDEX"
+    assert payload["product"] == "cash"
+    assert payload["action"] == "buy"
+    assert payload["order_type"] == "limit"
+    assert payload["quantity"] == "2"
+    assert payload["price"] == "70.50"
+    assert payload["validity"] == "day"
+    assert payload["right"] == "others"
+    assert payload["strike_price"] == "0"
+
+
+def test_limit_dry_run_does_not_require_credentials():
+    result = icici.place_limit_order(
+        symbol="GOLDEX",
+        side="SELL",
+        quantity=1,
+        limit_price=74.5,
+        dry_run=True,
+    )
+
+    assert result["ok"] is True
+    assert result["dry_run"] is True
+    assert result["payload"]["stock_code"] == "GOLDEX"
+    assert result["response"] is None

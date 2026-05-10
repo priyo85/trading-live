@@ -160,6 +160,51 @@
       </section>
 
       <section class="panel">
+        <div class="panel-head">
+          <h2>ICICI Limit Order</h2>
+          <button id="refreshOrderBook" type="button">Order Book</button>
+        </div>
+        <p class="hint">Breeze supports NSE cash limit orders. Keep dry run checked first; market orders are not permitted by the Breeze API.</p>
+        <form id="limitOrderForm" class="order-grid">
+          <label>
+            Symbol
+            <input id="limitSymbol" value="NSE:GOLDBEES" autocomplete="off">
+          </label>
+          <label>
+            Side
+            <select id="limitSide">
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+          </label>
+          <label>
+            Qty
+            <input id="limitQuantity" inputmode="numeric" value="1">
+          </label>
+          <label>
+            Limit
+            <input id="limitPrice" inputmode="decimal">
+          </label>
+          <label>
+            Validity
+            <select id="limitValidity">
+              <option value="day">Day</option>
+              <option value="ioc">IOC</option>
+            </select>
+          </label>
+          <label class="check-label">
+            <input id="limitDryRun" type="checkbox" checked>
+            Dry run
+          </label>
+          <div class="button-row">
+            <button id="fillLimitFromSelected" type="button">Use Selected Action</button>
+            <button class="primary" type="submit">Submit Limit</button>
+          </div>
+        </form>
+        <pre id="limitOrderResult" class="result-box"></pre>
+      </section>
+
+      <section class="panel">
         <h2>Open Holdings</h2>
         <div class="table-wrap">
           <table>

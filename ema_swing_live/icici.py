@@ -138,6 +138,77 @@ def test_session(
     return test_quote(stock_code=stock_code, credentials=credentials)
 
 
+def build_limit_order_payload(
+    symbol: str,
+    side: str,
+    quantity: int | str,
+    limit_price: float | str,
+    *,
+    validity: str = "day",
+    product: str | None = None,
+    exchange_code: str | None = None,
+    disclosed_quantity: int | str = "0",
+    expiry_date: str | None = None,
+    right: str | None = None,
+    strike_price: str | None = None,
+    user_remark: str = "",
+) -> dict[str, Any]:
+    """Build a Breeze regular limit order payload without touching the network."""
+
+    instrument = _instrument(symbol)
+    return {
+        "stock_code": instrument.stock_code,
+        "exchange_code": (exchange_code or instrument.exchange_code or "NSE").upper(),
+        "product": (product or instrument.product_type or "cash").lower(),
+        "action": _side(side).lower(),
+        "order_type": "limit",
+        "stoploss": "",
+        "quantity": str(_positive_int(quantity, "Quantity")),
+        "price": _price_text(limit_price, "Limit price"),
+        "validity": _validity(validity),
+        "validity_date": "",
+        "disclosed_quantity": str(_non_negative_int(disclosed_quantity, "Disclosed quantity")),
+        "expiry_date": expiry_date if expiry_date is not None else instrument.expiry_date,
+        "right": (right if right is not None else instrument.right) or "others",
+        "strike_price": (strike_price if strike_price is not None else instrument.strike_price) or "0",
+        "user_remark": _user_remark(user_remark),
+    }
+
+
+def place_limit_order(
+    symbol: str,
+    side: str,
+    quantity: int | str,
+    limit_price: float | str,
+    *,
+    dry_run: bool = True,
+    credentials: IciciCredentials | None = None,
+    **payload_options: Any,
+) -> dict[str, Any]:
+    payload = build_limit_order_payload(
+        symbol=symbol,
+        side=side,
+        quantity=quantity,
+        limit_price=limit_price,
+        **payload_options,
+    )
+    if dry_run:
+        return {"ok": True, "dry_run": True, "payload": payload, "response": None}
+
+    response = _client(credentials).place_order(**payload)
+    return {"ok": _response_ok(response), "dry_run": False, "payload": payload, "response": _safe_response(response)}
+
+
+def order_book(exchange_code: str = "NSE", from_date: str | None = None, to_date: str | None = None) -> dict[str, Any]:
+    today = date.today()
+    response = _client().get_order_list(
+        exchange_code=str(exchange_code or "NSE").upper(),
+        from_date=from_date or _breeze_datetime(today - timedelta(days=10)),
+        to_date=to_date or _breeze_datetime(today),
+    )
+    return {"ok": _response_ok(response), "response": _safe_response(response)}
+
+
 def build_gtt_single_leg_payload(
     symbol: str,
     side: str,
@@ -281,6 +352,16 @@ def _positive_int(value: int | str, label: str) -> int:
     return parsed
 
 
+def _non_negative_int(value: int | str, label: str) -> int:
+    try:
+        parsed = int(float(str(value or "0").strip()))
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be zero or a positive whole number.") from None
+    if parsed < 0:
+        raise ValueError(f"{label} must be zero or a positive whole number.")
+    return parsed
+
+
 def _price_text(value: float | str, label: str) -> str:
     try:
         parsed = float(str(value).replace(",", "").strip())
@@ -289,6 +370,21 @@ def _price_text(value: float | str, label: str) -> str:
     if parsed <= 0:
         raise ValueError(f"{label} must be a positive number.")
     return f"{parsed:.2f}"
+
+
+def _validity(value: str) -> str:
+    normalized = str(value or "day").strip().lower()
+    if normalized not in {"day", "ioc"}:
+        raise ValueError("Validity must be day or ioc.")
+    return normalized
+
+
+def _user_remark(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    cleaned = "".join(ch for ch in text if ch.isalnum() or ch in {"_", "-"})
+    return cleaned[:20]
 
 
 def _breeze_datetime(value: date) -> str:

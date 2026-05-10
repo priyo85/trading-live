@@ -212,6 +212,41 @@ def create_app() -> Flask:
             return jsonify({"error": f"ICICI quote test failed: {exc}"}), 500
         return jsonify({"test": test})
 
+    @app.post("/api/icici/order/limit")
+    @_login_required
+    def api_icici_limit_order():
+        payload = request.get_json(silent=True) or {}
+        try:
+            order = icici.place_limit_order(
+                symbol=str(payload.get("symbol", "")),
+                side=str(payload.get("side", "")),
+                quantity=payload.get("quantity", ""),
+                limit_price=payload.get("limit_price", ""),
+                dry_run=bool(payload.get("dry_run", True)),
+                validity=str(payload.get("validity", "day")),
+                user_remark=str(payload.get("user_remark", "")),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"ICICI limit order failed: {exc}"}), 500
+        return jsonify({"order": order})
+
+    @app.get("/api/icici/order/book")
+    @_login_required
+    def api_icici_order_book():
+        try:
+            orders = icici.order_book(
+                exchange_code=str(request.args.get("exchange_code", "NSE")),
+                from_date=_optional_text(request.args.get("from_date")),
+                to_date=_optional_text(request.args.get("to_date")),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"ICICI order book failed: {exc}"}), 500
+        return jsonify({"orders": orders})
+
     @app.post("/api/icici/gtt/single")
     @_login_required
     def api_icici_gtt_single():
