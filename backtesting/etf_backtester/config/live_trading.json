@@ -1,0 +1,23 @@
+{
+  "symbols": [],
+  "initial_capital": 100000.0,
+  "max_positions": 3,
+  "strategy": "ema_trend",
+  "ema_window": 9,
+  "rsi_window": 14,
+  "candidate_ranking": "ath",
+  "signal_source_mode": "saved",
+  "price_mode": "time",
+  "price_time": "15:15",
+  "intraday_interval": "5m",
+  "lookback_days": 120,
+  "rotate_to_stronger_candidates": false,
+  "compound_positions": true,
+  "mtf_enabled": false,
+  "mtf_broker": "ICICI Direct Prime 4999",
+  "mtf_interest_rate_annual_pct": 9.65,
+  "mtf_funded_multiple": 3.0,
+  "mtf_collateral_haircut_pct": 6.0,
+  "mtf_cash_buffer_pct": 20.0,
+  "mtf_pledged_liquidcase_value": 0.0
+}

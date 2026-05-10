@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>9 EMA Live Login</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body class="login-page">
+    <main class="login-shell">
+      <section class="login-panel">
+        <p class="eyebrow">Live access</p>
+        <h1>9 EMA Swing</h1>
+        {% if error %}
+          <div class="notice error">{{ error }}</div>
+        {% endif %}
+        <form method="post" class="stack">
+          <label>
+            Username
+            <input name="username" autocomplete="username" required>
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="current-password" required>
+          </label>
+          <button class="primary" type="submit">Login</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>
+

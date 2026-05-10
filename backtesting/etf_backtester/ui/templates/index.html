@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ETF Swing Strategy Lab</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260509_rsi_divergence">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">ETF Swing Strategy Lab</p>
+          <h1>ETF Swing Strategy Lab</h1>
+        </div>
+      </header>
+
+      <nav class="tab-bar" aria-label="ETF Swing Strategy Lab sections">
+        <button class="tab-button is-active" type="button" data-tab-target="setupTab">Backtest Setup</button>
+        <button class="tab-button" type="button" data-tab-target="liveTab">9 EMA Momentum Swing Daily Strategy Live</button>
+      </nav>
+
+      <section id="setupTab" class="tab-panel is-active">
+        <section class="panel workspace-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Backtest Setup</h2>
+              <p id="statusText">Ready</p>
+            </div>
+            <button id="runBacktest" class="primary-button" type="button">Run Backtest</button>
+          </div>
+          <nav class="backtest-subtab-bar" aria-label="Backtest setup sections">
+            <button class="backtest-subtab-button is-active" type="button" data-backtest-tab-target="etfUniverseTab">ETF Universe</button>
+            <button class="backtest-subtab-button" type="button" data-backtest-tab-target="configTab">Config</button>
+            <button class="backtest-subtab-button" type="button" data-backtest-tab-target="resultsTab">Backtest Result</button>
+          </nav>
+
+          <section id="etfUniverseTab" class="backtest-subtab-panel is-active">
+            <div class="panel-header">
+              <div>
+                <h2>ETF Universe</h2>
+                <p id="selectedCount">0 selected</p>
+              </div>
+              <div class="button-row">
+                <button id="selectAll" class="ghost-button" type="button">Select All</button>
+                <button id="clearSelection" class="ghost-button" type="button">Clear</button>
+              </div>
+            </div>
+            <label class="search-box wide-search">
+              <span>Filter ETFs</span>
+              <input id="filterEtfs" type="search" placeholder="Search ticker or theme">
+            </label>
+            <div id="etfList" class="etf-list etf-list-grid">
+              {% for symbol in etf_universe %}
+                <label class="etf-option">
+                  <input
+                    type="checkbox"
+                    name="symbols"
+                    value="{{ symbol }}"
+                    {% if loop.index <= defaults.max_positions %}checked{% endif %}
+                  >
+                  <span>{{ symbol }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </section>
+
+          <section id="configTab" class="backtest-subtab-panel">
+            <h2>Config</h2>
+            <div class="config-grid">
+              <label>
+                <span>Initial Capital</span>
+                <input id="initialCapital" type="number" min="1" step="1000" value="{{ defaults.initial_capital }}">
+              </label>
+              <label>
+                <span>Max ETFs To Buy</span>
+                <input id="maxPositions" type="number" min="1" max="{{ etf_universe|length }}" step="1" value="{{ defaults.max_positions }}">
+              </label>
+              <label>
+                <span>Start Date</span>
+                <input id="startDate" type="date" value="{{ defaults.start_date }}">
+              </label>
+              <label>
+                <span>End Date</span>
+                <input id="endDate" type="date" value="{{ defaults.end_date }}">
+              </label>
+              <label>
+                <span>Strategy</span>
+                <select id="strategyName">
+                  <option value="ema_trend">{{ strategies.ema_trend.display_name }}</option>
+                  <option value="weekly_ema_cross">{{ strategies.weekly_ema_cross.display_name }}</option>
+                  <option value="ema_entry_low_sell">{{ strategies.ema_entry_low_sell.display_name }}</option>
+                  <option value="ema_atr_confirmed">{{ strategies.ema_atr_confirmed.display_name }}</option>
+                  <option value="ema_atr_sell_band">{{ strategies.ema_atr_sell_band.display_name }}</option>
+                  <option value="rsi_50_cross">{{ strategies.rsi_50_cross.display_name }}</option>
+                  <option value="rsi_divergence_staged">{{ strategies.rsi_divergence_staged.display_name }}</option>
+                </select>
+              </label>
+              <label id="emaWindowField">
+                <span>EMA Window</span>
+                <input id="emaWindow" type="number" min="2" max="200" step="1" value="{{ defaults.ema_window }}">
+              </label>
+              <label id="rsiWindowField">
+                <span>RSI Window</span>
+                <input id="rsiWindow" type="number" min="2" max="200" step="1" value="{{ defaults.rsi_window }}">
+              </label>
+              <label id="atrWindowField">
+                <span>ATR Window</span>
+                <input id="atrWindow" type="number" min="2" max="200" step="1" value="{{ defaults.atr_window }}">
+              </label>
+              <label id="atrMultiplierField">
+                <span>ATR Multiplier</span>
+                <input id="atrMultiplier" type="number" min="0" max="5" step="0.05" value="{{ defaults.atr_multiplier }}">
+              </label>
+              <label id="confirmationDaysField">
+                <span>Confirmation Days</span>
+                <input id="confirmationDays" type="number" min="1" max="20" step="1" value="{{ defaults.confirmation_days }}">
+              </label>
+              <label>
+                <span>Price Source</span>
+                <select id="priceMode">
+                  <option value="time" selected>Selected Time</option>
+                  <option value="daily_close">Daily Candle Close</option>
+                </select>
+              </label>
+              <label id="priceTimeField">
+                <span>Buy/Sell Price Time</span>
+                <input id="priceTime" type="time" value="{{ defaults.price_time }}">
+              </label>
+              <label>
+                <span>Candidate Ranking</span>
+                <select id="candidateRanking">
+                  <option value="ath" selected>Prefer ETFs Closest To ATH</option>
+                  <option value="momentum_20_60">Prefer 20/60 Positive Momentum</option>
+                  <option value="none">No Ranking</option>
+                </select>
+              </label>
+              <label class="toggle-field">
+                <input id="rotateStrongCandidates" type="checkbox" {% if defaults.rotate_to_stronger_candidates %}checked{% endif %}>
+                <span>Rotate Into Stronger ETF</span>
+              </label>
+              <label class="toggle-field">
+                <input id="compoundPositions" type="checkbox" {% if defaults.compound_positions %}checked{% endif %}>
+                <span>Compound Profits</span>
+              </label>
+              <label>
+                <span>MTF Mode</span>
+                <select id="mtfMode">
+                  <option value="off" {% if defaults.mtf_mode == "off" %}selected{% endif %}>Off</option>
+                  <option value="overflow" {% if defaults.mtf_mode == "overflow" %}selected{% endif %}>Overflow Signals</option>
+                  <option value="normal" {% if defaults.mtf_mode == "normal" %}selected{% endif %}>Normal Slots Only</option>
+                </select>
+              </label>
+              <label>
+                <span>MTF Cap Multiplier</span>
+                <input id="extraCapitalLimitMultiplier" type="number" min="0" max="3" step="0.1" value="{{ defaults.extra_capital_limit_multiplier }}">
+              </label>
+              <label>
+                <span>Max Extra MTF ETFs / Signal Day</span>
+                <input id="maxOverflowPositions" type="number" min="0" max="{{ etf_universe|length }}" step="1" value="{{ defaults.max_overflow_positions }}">
+              </label>
+              <label>
+                <span>MTF Interest / Day (%)</span>
+                <input id="extraCapitalInterestDaily" type="number" min="0" max="10" step="0.001" value="{{ defaults.extra_capital_interest_rate_daily_pct }}">
+              </label>
+              <label>
+                <span>Monthly Capital Add</span>
+                <input id="monthlyCapitalAddition" type="number" min="0" step="1000" value="{{ defaults.monthly_capital_addition }}">
+              </label>
+              <label>
+                <span>Withdrawal Target Equity</span>
+                <input id="withdrawalTarget" type="number" min="0" step="100000" value="{{ defaults.withdrawal_target }}">
+              </label>
+              <label>
+                <span>Monthly Withdraw Amount</span>
+                <input id="monthlyWithdrawalAmount" type="number" min="0" step="1000" value="{{ defaults.monthly_withdrawal_amount }}">
+              </label>
+            </div>
+
+            <div class="table-title-row">
+              <h3 class="table-title">Signal Source Mapping</h3>
+            </div>
+            <div class="signal-source-grid">
+              <label>
+                <span>Apply Mapping</span>
+                <select id="signalSourceMode">
+                  <option value="etf">Use ETF Price For All</option>
+                  <option value="saved">Use Saved Mapping For All</option>
+                  <option value="custom">Use One Custom Source For All</option>
+                  <option value="individual">Customize Per ETF</option>
+                </select>
+              </label>
+              <label id="globalSignalSourceField">
+                <span>Custom Source</span>
+                <input id="globalSignalSource" type="text" placeholder="YAHOO:^NSEI or NSE:GOLDBEES">
+              </label>
+            </div>
+            <div class="table-wrap mapping-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ETF</th>
+                    <th>Signal Source</th>
+                  </tr>
+                </thead>
+                <tbody id="signalSourceBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="resultsTab" class="backtest-subtab-panel">
+            <div id="metrics" class="metrics-grid"></div>
+            <div id="message" class="message">Choose ETFs and run a backtest.</div>
+
+            <h3 id="periodReportTitle" class="table-title">Profit Report</h3>
+            <div class="table-wrap period-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Period</th>
+                    <th>Start Equity</th>
+                    <th>End Equity</th>
+                    <th>Profit</th>
+                    <th>Return</th>
+                  </tr>
+                </thead>
+                <tbody id="periodReturnsBody"></tbody>
+              </table>
+            </div>
+
+            <h3 class="table-title">Capital Ledger</h3>
+            <div class="table-wrap capital-flow-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody id="capitalFlowsBody"></tbody>
+              </table>
+            </div>
+
+            <h3 class="table-title">Open Positions</h3>
+            <div class="table-wrap open-position-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ETF</th>
+                    <th>Entry Date</th>
+                    <th>Holding Days</th>
+                    <th>Shares</th>
+                    <th>Entry Price</th>
+                    <th>Last Price</th>
+                    <th>Market Value</th>
+                    <th>Unrealized Profit</th>
+                  </tr>
+                </thead>
+                <tbody id="openPositionsBody"></tbody>
+              </table>
+            </div>
+
+            <h3 class="table-title">Profit Per ETF</h3>
+            <div class="table-wrap per-symbol-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ETF</th>
+                    <th>Realized Profit</th>
+                    <th>Unrealized Profit</th>
+                    <th>Total Profit</th>
+                    <th>Closed Trades</th>
+                    <th>Open Qty</th>
+                    <th>Min Holding Days</th>
+                    <th>Max Holding Days</th>
+                  </tr>
+                </thead>
+                <tbody id="perSymbolBody"></tbody>
+              </table>
+            </div>
+
+            <h3 class="table-title">Buy/Sell Data</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>ETF</th>
+                    <th>Buy Date</th>
+                    <th>Buy Time</th>
+                    <th>Buy Price</th>
+                    <th>Quantity</th>
+                    <th>Total Invested</th>
+                    <th>Sell Date</th>
+                    <th>Sell Time</th>
+                    <th>Sell Price</th>
+                    <th>Total Sold</th>
+                    <th>Realized Profit</th>
+                    <th>Profit %</th>
+                    <th>Holding Days</th>
+                    <th>Entry Low</th>
+                    <th>Entry EMA</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody id="tradesBody"></tbody>
+              </table>
+            </div>
+
+            <section class="saved-results-section">
+              <div class="panel-header compact-panel-header">
+                <div>
+                  <h2>Saved Results</h2>
+                  <p id="savedStatus">Previous reports are saved as JSON files.</p>
+                </div>
+                <div class="button-row">
+                  <button id="refreshReports" class="ghost-button" type="button">Refresh</button>
+                  <button id="compareReports" class="ghost-button" type="button">Compare</button>
+                </div>
+              </div>
+              <div class="table-wrap saved-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th>Saved</th>
+                      <th>Condition</th>
+                      <th>Period</th>
+                      <th>ETFs</th>
+                      <th>End Equity</th>
+                      <th>CAGR</th>
+                      <th>XIRR</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="savedReportsBody"></tbody>
+                </table>
+              </div>
+              <h3 class="table-title">Compare Results</h3>
+              <div class="table-wrap compare-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Report</th>
+                      <th>Condition</th>
+                      <th>Period</th>
+                      <th>ETFs</th>
+                      <th>End Equity</th>
+                      <th>Realized</th>
+                      <th>Unrealized</th>
+                      <th>CAGR</th>
+                      <th>XIRR</th>
+                      <th>Total Return</th>
+                      <th>Trades</th>
+                    </tr>
+                  </thead>
+                  <tbody id="compareBody"></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+        </section>
+      </section>
+
+      <section id="liveTab" class="tab-panel">
+        <section class="panel live-panel">
+          <div class="panel-header">
+            <div>
+              <h2>9 EMA Momentum Swing Daily Strategy Live</h2>
+              <p id="liveStatus">Generate buy/sell actions from current market price.</p>
+            </div>
+          </div>
+          <div id="liveMetrics" class="metrics-grid"></div>
+          <nav class="live-subtab-bar" aria-label="Live trading sections">
+            <button class="live-subtab-button is-active" type="button" data-live-tab-target="liveConfigPanel">Configuration</button>
+            <button class="live-subtab-button" type="button" data-live-tab-target="liveSignalsPanel">Signal & Execution</button>
+            <button class="live-subtab-button" type="button" data-live-tab-target="liveLedgerPanel">Past Trade Ledger</button>
+          </nav>
+
+          <section id="liveConfigPanel" class="live-subtab-panel is-active">
+            <h3 class="table-title">Live Configuration</h3>
+            <div class="config-grid compact-config-grid">
+              <label>
+                <span>Max Live ETFs</span>
+                <input id="liveMaxEtfs" type="number" min="1" step="1">
+              </label>
+              <label class="toggle-field">
+                <input id="liveMtfEnabled" type="checkbox">
+                <span>Use MTF For Live Buys</span>
+              </label>
+              <label>
+                <span>MTF Broker Rule</span>
+                <input id="liveMtfBroker" type="text" value="ICICI Direct Prime 4999">
+              </label>
+              <label>
+                <span>Pledged LiquidCASE Value</span>
+                <input id="liveMtfLiquidcase" type="number" min="0" step="1000">
+              </label>
+              <label>
+                <span>Cash Buffer (%)</span>
+                <input id="liveMtfCashBufferPct" type="number" min="0" max="100" step="0.1">
+              </label>
+              <label>
+                <span>Funded Multiple</span>
+                <input id="liveMtfFundedMultiple" type="number" min="0" max="5" step="0.1">
+              </label>
+              <label>
+                <span>Collateral Haircut (%)</span>
+                <input id="liveMtfHaircutPct" type="number" min="0" max="100" step="0.1">
+              </label>
+              <label>
+                <span>MTF Interest / Year (%)</span>
+                <input id="liveMtfInterestAnnualPct" type="number" min="0" max="100" step="0.01">
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="saveLiveConfig" class="ghost-button" type="button">Save Live Config</button>
+            </div>
+
+            <h3 class="table-title">Dhan Live Data</h3>
+            <div class="config-grid compact-config-grid">
+              <label>
+                <span>Client ID</span>
+                <input id="dhanClientId" type="text" autocomplete="off" placeholder="Auto-read from token">
+              </label>
+              <label>
+                <span>Access Token</span>
+                <input id="dhanAccessToken" type="password" autocomplete="off" placeholder="Paste Dhan access token">
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="saveDhanCredentials" class="ghost-button" type="button">Save Dhan Credentials</button>
+            </div>
+            <p id="dhanCredentialStatus" class="form-note">Dhan credentials are used for faster live quotes.</p>
+
+            <div class="table-title-row">
+              <h3 class="table-title">Capital Ledger</h3>
+              <div class="button-row">
+                <button id="addLiveCapital" class="ghost-button" type="button">Add Capital Row</button>
+                <button id="saveLiveCapitalLedger" class="primary-button" type="button">Save Capital Ledger</button>
+              </div>
+            </div>
+            <div class="table-wrap period-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Note</th>
+                    <th>Created</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="liveCapitalBody"></tbody>
+              </table>
+            </div>
+
+            <div class="table-title-row">
+              <h3 class="table-title">Saved ETF Signal Mapping</h3>
+              <div class="button-row">
+                <button id="addSignalMapping" class="ghost-button" type="button">Add Mapping</button>
+                <button id="saveSignalMappings" class="primary-button" type="button">Save Mapping</button>
+              </div>
+            </div>
+            <div class="table-wrap mapping-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ETF</th>
+                    <th>Signal Source</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="savedSignalMappingBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="liveSignalsPanel" class="live-subtab-panel">
+            <div class="table-title-row">
+              <h3 class="table-title">Generated Actions</h3>
+              <div class="button-row">
+                <label class="toggle-field compact-toggle">
+                  <input id="autoRefreshLiveSignals" type="checkbox">
+                  <span>Auto refresh 5 min</span>
+                </label>
+                <button id="runLiveSignals" class="ghost-button" type="button">Generate Signals</button>
+                <button id="applyLiveActions" class="primary-button" type="button">Apply Selected Actions</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Apply</th>
+                    <th>Side</th>
+                    <th>ETF</th>
+                    <th>Signal Date</th>
+                    <th>Time</th>
+                    <th>Price</th>
+                    <th>Shares</th>
+                    <th>Value</th>
+                    <th>Funding</th>
+                    <th>MTF Loan</th>
+                    <th>Cash Req.</th>
+                    <th>ATH Distance</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody id="liveActionsBody"></tbody>
+              </table>
+            </div>
+
+            <h3 class="table-title">All ETF 9 EMA Signals</h3>
+            <div class="table-wrap tall-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ETF</th>
+                    <th>Signal Source</th>
+                    <th>Signal</th>
+                    <th>Signal Date</th>
+                    <th>Source Price</th>
+                    <th>Source EMA 9</th>
+                    <th>Time</th>
+                    <th>Price</th>
+                    <th>ATH Source</th>
+                    <th>ATH Source Price</th>
+                    <th>ATH</th>
+                    <th>ATH Distance</th>
+                    <th>Selected</th>
+                    <th>Held</th>
+                  </tr>
+                </thead>
+                <tbody id="liveSignalRowsBody"></tbody>
+              </table>
+            </div>
+
+            <div class="table-title-row">
+              <h3 class="table-title">Live Holdings</h3>
+              <div class="button-row">
+                <button id="addLiveHolding" class="ghost-button" type="button">Add Holding</button>
+                <button id="saveLiveLedger" class="primary-button" type="button">Save Ledger</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ETF</th>
+                    <th>Execution Date</th>
+                    <th>Shares</th>
+                    <th>Entry</th>
+                    <th>Invested Value</th>
+                    <th>Last</th>
+                    <th>Market Value</th>
+                    <th>Unrealized Profit</th>
+                    <th>Unrealized %</th>
+                    <th>Funding</th>
+                    <th>MTF Loan</th>
+                    <th>Signal</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="liveHoldingsBody"></tbody>
+              </table>
+            </div>
+
+          </section>
+
+          <section id="liveLedgerPanel" class="live-subtab-panel">
+            <div class="table-title-row">
+              <h3 class="table-title">Completed Trades Ledger</h3>
+              <div class="button-row">
+                <button id="addCompletedTrade" class="ghost-button" type="button">Add Completed Trade</button>
+                <button id="saveCompletedLedger" class="primary-button" type="button">Save Ledger</button>
+                <button id="clearLiveLedger" class="ghost-button" type="button">Clear Ledger</button>
+              </div>
+            </div>
+            <div id="liveLedgerMetrics" class="metrics-grid"></div>
+            <div class="table-wrap tall-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ETF</th>
+                    <th>Buy Date</th>
+                    <th>Buy Price</th>
+                    <th>Sell Date</th>
+                    <th>Sell Price</th>
+                    <th>Shares</th>
+                    <th>Buy Value</th>
+                    <th>Sell Value</th>
+                    <th>Realized Profit</th>
+                    <th>Return</th>
+                    <th>CAGR</th>
+                    <th>Monthly Profit</th>
+                    <th>Holding Days</th>
+                    <th>Reason</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="liveBookedTradesBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      window.BACKTESTER_BASE_PATH = {{ request.script_root|tojson }};
+      window.ETF_BACKTESTER_SIGNAL_SOURCES = {{ signal_sources|tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=20260509_rsi_divergence"></script>
+  </body>
+</html>

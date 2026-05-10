@@ -1,0 +1,5 @@
+instance/
+*.log
+__pycache__/
+*.pyc
+

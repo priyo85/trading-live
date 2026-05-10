@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>9 EMA Swing Live</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Live only</p>
+        <h1>9 EMA Swing Daily</h1>
+      </div>
+      <form action="{{ url_for('logout') }}" method="post">
+        <button class="ghost" type="submit">Logout</button>
+      </form>
+    </header>
+
+    <main class="layout">
+      <section class="toolbar">
+        <label>
+          Data
+          <select id="dataProvider">
+            <option value="auto">Auto</option>
+            <option value="dhan">Dhan</option>
+            <option value="icici">ICICI</option>
+            <option value="yahoo">Yahoo</option>
+          </select>
+        </label>
+        <label>
+          Price
+          <select id="priceMode">
+            <option value="current">CMP</option>
+            <option value="daily_close">Daily close</option>
+          </select>
+        </label>
+        <button id="runSignals" class="primary" type="button">Run</button>
+        <button id="applySelected" type="button">Book Selected</button>
+      </section>
+
+      <section id="message" class="notice hidden"></section>
+
+      <section class="kpis">
+        <article>
+          <span>Equity</span>
+          <strong id="kpiEquity">-</strong>
+        </article>
+        <article>
+          <span>Cash</span>
+          <strong id="kpiCash">-</strong>
+        </article>
+        <article>
+          <span>Holdings</span>
+          <strong id="kpiHoldings">-</strong>
+        </article>
+        <article>
+          <span>Run</span>
+          <strong id="kpiRun">-</strong>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Actions</h2>
+            <button id="clearLedger" class="danger" type="button">Clear Ledger</button>
+          </div>
+          <div id="actionsList" class="action-list"></div>
+        </article>
+
+        <article class="panel">
+          <h2>Configuration</h2>
+          <form id="configForm" class="stack">
+            <label>
+              Initial capital
+              <input id="initialCapital" inputmode="decimal">
+            </label>
+            <label>
+              Max positions
+              <input id="maxPositions" inputmode="numeric">
+            </label>
+            <label>
+              Symbols
+              <textarea id="symbolsText" rows="5"></textarea>
+            </label>
+            <button type="submit">Save Config</button>
+          </form>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>ICICI Direct</h2>
+        <form id="iciciForm" class="icici-grid">
+          <label>
+            API key
+            <input id="iciciApiKey" autocomplete="off">
+          </label>
+          <label>
+            Secret key
+            <input id="iciciSecret" type="password" autocomplete="off">
+          </label>
+          <label>
+            Session token
+            <input id="iciciSession" type="password" autocomplete="off">
+          </label>
+          <label>
+            ETF code
+            <input id="iciciStock" value="GOLDEX">
+          </label>
+          <div class="button-row">
+            <button id="openIciciLogin" type="button">Open Login</button>
+            <button class="primary" type="submit">Save & Test</button>
+            <button id="testIciciQuote" type="button">Test Quote</button>
+          </div>
+        </form>
+        <pre id="iciciResult" class="result-box"></pre>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>ICICI GTT Order</h2>
+          <button id="refreshGttBook" type="button">GTT Book</button>
+        </div>
+        <form id="gttForm" class="order-grid">
+          <label>
+            Symbol
+            <input id="gttSymbol" value="NSE:GOLDBEES" autocomplete="off">
+          </label>
+          <label>
+            Side
+            <select id="gttSide">
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+          </label>
+          <label>
+            Qty
+            <input id="gttQuantity" inputmode="numeric" value="1">
+          </label>
+          <label>
+            Trigger
+            <input id="gttTriggerPrice" inputmode="decimal">
+          </label>
+          <label>
+            Limit
+            <input id="gttLimitPrice" inputmode="decimal">
+          </label>
+          <label class="check-label">
+            <input id="gttDryRun" type="checkbox" checked>
+            Dry run
+          </label>
+          <div class="button-row">
+            <button id="fillGttFromSelected" type="button">Use Selected Action</button>
+            <button class="primary" type="submit">Submit GTT</button>
+          </div>
+        </form>
+        <pre id="gttResult" class="result-box"></pre>
+      </section>
+
+      <section class="panel">
+        <h2>Open Holdings</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Qty</th>
+                <th>Entry</th>
+                <th>Last</th>
+                <th>P/L</th>
+              </tr>
+            </thead>
+            <tbody id="holdingsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>All Signals</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Source</th>
+                <th>Signal</th>
+                <th>Source Px/EMA</th>
+                <th>Price</th>
+                <th>Last Event</th>
+                <th>ATH Dist</th>
+                <th>Held</th>
+              </tr>
+            </thead>
+            <tbody id="signalsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      window.ETF_UNIVERSE = {{ etf_universe | tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

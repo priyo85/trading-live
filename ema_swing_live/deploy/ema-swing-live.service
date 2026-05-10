@@ -1,0 +1,15 @@
+[Unit]
+Description=9 EMA Swing Live Dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ema-swing-live
+EnvironmentFile=/opt/ema-swing-live/.env
+ExecStart=/opt/ema-swing-live/.venv/bin/gunicorn -w 2 -b 127.0.0.1:8080 ema_swing_live.wsgi:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

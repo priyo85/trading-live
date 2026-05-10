@@ -1,0 +1,68 @@
+{
+  "backtest": {
+    "initial_capital": 100000.0,
+    "commission_rate": 0.001,
+    "slippage_rate": 0.0005,
+    "position_fraction": 1.0,
+    "max_positions": 3,
+    "default_start_date": "2024-01-01",
+    "rank_buy_candidates_by_ath": true,
+    "price_time": "15:15",
+    "intraday_interval": "5m",
+    "yearly_report_threshold_years": 2,
+    "rotate_to_stronger_candidates": false,
+    "compound_positions": true
+  },
+  "web_ui": {
+    "host": "127.0.0.1",
+    "port": 5000
+  },
+  "strategies": {
+    "moving_average_crossover": {
+      "fast_window": 20,
+      "slow_window": 50
+    },
+    "ema_trend": {
+      "display_name": "Close above EMA",
+      "window": 9
+    },
+    "weekly_ema_cross": {
+      "display_name": "Weekly EMA 9 cross",
+      "window": 9,
+      "confirmation_days": 2
+    },
+    "ema_entry_low_sell": {
+      "display_name": "EMA 9 entry low/EMA sell price",
+      "window": 9
+    },
+    "ema_atr_confirmed": {
+      "display_name": "EMA 9 ATR confirmed",
+      "ema_window": 9,
+      "atr_window": 14,
+      "atr_multiplier": 0.25,
+      "confirmation_days": 2
+    },
+    "ema_atr_sell_band": {
+      "display_name": "EMA 9 ATR sell band only",
+      "ema_window": 9,
+      "atr_window": 14,
+      "atr_multiplier": 0.25
+    },
+    "rsi_50_cross": {
+      "display_name": "RSI cross above/below 50",
+      "window": 14,
+      "threshold": 50
+    },
+    "rsi_divergence_staged": {
+      "display_name": "RSI divergence staged thirds",
+      "window": 14,
+      "oversold_threshold": 30,
+      "overbought_threshold": 70,
+      "divergence_max_rsi": 40,
+      "pivot_span": 2,
+      "regular_min_rsi_improvement": 3,
+      "double_bottom_low_tolerance": 0.001,
+      "double_bottom_min_rsi_improvement": 5
+    }
+  }
+}

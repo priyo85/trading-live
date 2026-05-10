@@ -1,0 +1,124 @@
+{
+  "aliases": {
+    "NSE:GROWWRAIL": "GROIRP",
+    "NSE:EVINDIA": "MIREVA",
+    "NSE:AUTOIETF": "ICIAUT",
+    "NSE:MODEFENCE": "MOTDEF",
+    "NSE:FMCGIETF": "ICIFMC",
+    "NSE:PVTBANIETF": "ICIPRI",
+    "NSE:INFRAIETF": "ICIINF",
+    "NSE:SILVERBEES": "NIPSIL",
+    "NSE:CPSEETF": "CPSETF",
+    "NSE:MIDCAPETF": "MIR150",
+    "NSE:GOLDBEES": "GOLDEX",
+    "NSE:MON100": "MOTNAS",
+    "NSE:MOREALTY": "MONET1",
+    "NSE:HNGSNGBEES": "HANBEE",
+    "NSE:ITBEES": "NIPNIT",
+    "NSE:ALPHA": "KOTN50",
+    "NSE:MOHEALTH": "MOTHEA",
+    "NSE:PSUBNKBEES": "PSUBAN",
+    "NSE:SML100CASE": "ZERNSM",
+    "NSE:MAFANG": "MIRNYS",
+    "NSE:TNIDETF": "TATNID",
+    "NSE:MOENERGY": "MOTENE",
+    "NSE:METALIETF": "ICIMET",
+    "NSE:PHARMABEES": "NIPPHA",
+    "NSE:OILIETF": "ICIOIL",
+    "NSE:NIFTY_50": {
+      "stock_code": "NIFTY",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_AUTO": {
+      "stock_code": "CNXAUTO",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_FMCG": {
+      "stock_code": "CNXFMCG",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_INFRA": {
+      "stock_code": "CNXINF",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_IT": {
+      "stock_code": "CNXIT",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_METAL": {
+      "stock_code": "CNXMETAL",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_PHARMA": {
+      "stock_code": "CNXPHARMA",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_PSU_BANK": {
+      "stock_code": "CNXPSUBANK",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_REALTY": {
+      "stock_code": "CNXREALTY",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_ENERGY": {
+      "stock_code": "CNXENERGY",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_SMLCAP_100": {
+      "stock_code": "CNXSC",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_MIDCAP_100": {
+      "stock_code": "NIFTY_MIDCAP_100",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_CPSE": {
+      "stock_code": "NIFCPS",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_PRIVATE_BANK": {
+      "stock_code": "NIFPVTBANK",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_ALPHA_50": {
+      "stock_code": "NIFTYALPHA50",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_HEALTHCARE": {
+      "stock_code": "NIFTY_HEALTHCARE",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_INDIA_DEFENCE": {
+      "stock_code": "NIFTYINDIADEFENCE",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_OIL_AND_GAS": {
+      "stock_code": "NIFTY_OIL_AND_GAS",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    },
+    "NSE:NIFTY_INDIA_DIGITAL": {
+      "stock_code": "NIFTY_IND_DIGITAL",
+      "exchange_code": "NSE",
+      "product_type": "cash"
+    }
+  }
+}
