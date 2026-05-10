@@ -73,7 +73,9 @@ function renderIcici(credentials) {
 function renderReport(report) {
   $("kpiEquity").textContent = money(report?.equity);
   $("kpiCash").textContent = money(report?.cash ?? state.liveState?.cash);
-  $("kpiHoldings").textContent = report?.holdings?.length ?? Object.keys(state.liveState?.holdings || {}).length || "-";
+  const stateHoldings = state.liveState?.holdings || {};
+  const holdingsCount = report?.holdings?.length ?? Object.keys(stateHoldings).length;
+  $("kpiHoldings").textContent = holdingsCount || "-";
   $("kpiRun").textContent = report?.data_as_of ? `${report.run_date || "-"} / data ${report.data_as_of}` : (report?.run_date || "-");
   renderActions(report?.actions || []);
   renderHoldings(report?.holdings || []);
