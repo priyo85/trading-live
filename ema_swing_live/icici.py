@@ -210,6 +210,14 @@ def order_book(exchange_code: str = "NSE", from_date: str | None = None, to_date
     return {"ok": _response_ok(response), "response": _safe_response(response)}
 
 
+def cancel_order(exchange_code: str, order_id: str) -> dict[str, Any]:
+    cleaned_order_id = str(order_id or "").strip()
+    if not cleaned_order_id:
+        raise ValueError("Broker order ID is required.")
+    response = _client().cancel_order(exchange_code=str(exchange_code or "NSE").upper(), order_id=cleaned_order_id)
+    return {"ok": _response_ok(response), "response": _safe_response(response)}
+
+
 def build_gtt_single_leg_payload(
     symbol: str,
     side: str,

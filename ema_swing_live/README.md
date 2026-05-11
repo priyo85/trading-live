@@ -133,7 +133,11 @@ References:
 
 The dashboard places regular ICICI Breeze limit orders directly from generated 9 EMA actions. Run signals, review the generated actions, choose `Cash` or `MTF`, adjust quantity/limit price if needed, then use `Preview` before `Place`.
 
-Successful broker responses are recorded in the local broker order log, and the action can be booked into the strategy ledger automatically. The broker order book can be refreshed from the dashboard.
+The ICICI panel shows live session status. If it is not connected, generate a fresh Breeze session token with `Open Login`, paste it, then `Save & Test`.
+
+Successful broker responses are recorded in the local broker order log, and the action can be booked into the strategy ledger automatically. Preview rows can be removed, and broker orders with an order ID can be cancelled from the dashboard. The broker order book can be refreshed from the dashboard.
+
+For MTF buy actions, the UI defaults quantity from the configured MTF funded multiple, matching the live strategy MTF assumptions, while still allowing manual override before placing the order.
 
 Strategy holdings and the booked order ledger are editable from the dashboard. Save manual edits before the next signal run so the strategy sees the updated state.
 

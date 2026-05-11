@@ -254,6 +254,17 @@ def create_app() -> Flask:
             return jsonify({"error": f"ICICI quote test failed: {exc}"}), 500
         return jsonify({"test": test})
 
+    @app.get("/api/icici/connection")
+    @_login_required
+    def api_icici_connection():
+        stock_code = str(request.args.get("stock_code", "GOLDEX"))
+        try:
+            test = icici.test_quote(stock_code)
+            connected = bool(test.get("ok"))
+        except Exception as exc:
+            return jsonify({"connected": False, "error": str(exc), "credentials": icici.credentials_status()})
+        return jsonify({"connected": connected, "test": test, "credentials": icici.credentials_status()})
+
     @app.post("/api/icici/order/limit")
     @_login_required
     def api_icici_limit_order():
@@ -319,6 +330,12 @@ def create_app() -> Flask:
     def api_broker_orders():
         return jsonify({"broker_orders": _load_broker_orders()})
 
+    @app.delete("/api/broker/orders/<order_log_id>")
+    @_login_required
+    def api_broker_order_delete(order_log_id: str):
+        orders = [order for order in _load_broker_orders() if str(order.get("id", "")) != order_log_id]
+        return jsonify({"broker_orders": _save_broker_orders(orders)})
+
     @app.get("/api/icici/order/book")
     @_login_required
     def api_icici_order_book():
@@ -333,6 +350,26 @@ def create_app() -> Flask:
         except Exception as exc:
             return jsonify({"error": f"ICICI order book failed: {exc}"}), 500
         return jsonify({"orders": orders})
+
+    @app.post("/api/icici/order/cancel")
+    @_login_required
+    def api_icici_order_cancel():
+        payload = request.get_json(silent=True) or {}
+        try:
+            order_id = str(payload.get("order_id", ""))
+            cancel = icici.cancel_order(exchange_code=str(payload.get("exchange_code", "NSE")), order_id=order_id)
+            orders = _load_broker_orders()
+            for order in orders:
+                if str(order.get("broker_order_id", "")) == order_id:
+                    order["cancel_response"] = cancel.get("response")
+                    order["cancel_ok"] = bool(cancel.get("ok"))
+                    order["message"] = _broker_order_message(cancel.get("response")) or order.get("message", "")
+            _save_broker_orders(orders)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"ICICI order cancel failed: {exc}"}), 500
+        return jsonify({"cancel": cancel, "broker_orders": _load_broker_orders()})
 
     @app.post("/api/icici/gtt/single")
     @_login_required

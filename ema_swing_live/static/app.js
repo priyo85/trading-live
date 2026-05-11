@@ -53,6 +53,7 @@ function renderStatus(payload) {
   renderIcici(payload.icici || {});
   renderBrokerOrders();
   renderLedger();
+  checkIciciConnection();
 }
 
 function renderConfig(config) {
@@ -67,7 +68,31 @@ function renderIcici(credentials) {
   if (credentials.session_token && !$("iciciSession").value) $("iciciSession").value = credentials.session_token;
   $("iciciResult").textContent = credentials.configured
     ? `Configured: ${credentials.masked_api_key || "yes"}\nSecret: ${credentials.masked_api_secret || "saved"}\nSession: ${credentials.masked_session_token || "saved"}\n${credentials.path || ""}`
-    : "Not configured";
+    : "Not configured. Enter API key/secret, use Open Login to generate a session token, then Save & Test.";
+}
+
+function setIciciConnection(connected, detail = "") {
+  const badge = $("iciciConnection");
+  if (!badge) return;
+  badge.classList.toggle("ok", Boolean(connected));
+  badge.classList.toggle("bad", !connected);
+  badge.textContent = connected ? "Connected" : "Session needed";
+  badge.title = detail || badge.textContent;
+}
+
+async function checkIciciConnection() {
+  const badge = $("iciciConnection");
+  if (!badge) return;
+  badge.textContent = "Checking...";
+  try {
+    const payload = await api(`/api/icici/connection?stock_code=${encodeURIComponent($("iciciStock")?.value || "GOLDEX")}`);
+    setIciciConnection(payload.connected, payload.error || payload.test?.time || "");
+    if (!payload.connected && payload.error) {
+      $("iciciResult").textContent = `Session needed: ${payload.error}\nUse Open Login to generate a new Breeze session token.`;
+    }
+  } catch (error) {
+    setIciciConnection(false, error.message);
+  }
 }
 
 function renderReport(report) {
@@ -91,8 +116,15 @@ function renderActions(actions) {
   const rowsBySymbol = new Map((state.report?.signal_rows || []).map((row) => [row.symbol, row]));
   target.innerHTML = actions.map((action) => {
     const product = action.funding_mode === "mtf" ? "mtf" : "cash";
+    const fundedMultiple = Number(state.config?.mtf_funded_multiple || 3);
+    const mtfAvailable = Number(state.report?.mtf?.available || 0);
+    const mtfBudget = action.side === "BUY"
+      ? Math.max(action.value * fundedMultiple, action.value)
+      : action.value;
+    const cappedMtfBudget = mtfAvailable > 0 ? Math.min(mtfBudget, mtfAvailable) : mtfBudget;
+    const mtfQty = action.price > 0 ? Math.max(Math.floor(cappedMtfBudget / action.price), 1) : action.shares;
     return `
-      <article class="action-card trade-action" data-action-id="${escapeAttr(action.id || "")}">
+      <article class="action-card trade-action" data-action-id="${escapeAttr(action.id || "")}" data-cash-qty="${escapeAttr(action.shares || 0)}" data-mtf-qty="${escapeAttr(mtfQty || action.shares || 0)}">
         <div>
           <strong class="${action.side === "BUY" ? "side-buy" : "side-sell"}">${escapeHtml(action.side)} ${escapeHtml(action.symbol)}</strong>
           <span>${escapeHtml(action.reason || "")}${sourceSummary(rowsBySymbol.get(action.symbol))}</span>
@@ -122,7 +154,7 @@ function renderActions(actions) {
 function renderBrokerOrders() {
   const rows = state.brokerOrders || [];
   $("brokerOrdersBody").innerHTML = rows.length ? rows.slice().reverse().map((row) => `
-    <tr>
+    <tr data-order-log-id="${escapeAttr(row.id || "")}" data-broker-order-id="${escapeAttr(row.broker_order_id || "")}">
       <td>${escapeHtml(row.created_at || "")}</td>
       <td>${escapeHtml(row.symbol || "")}</td>
       <td>${escapeHtml(row.side || "")}</td>
@@ -132,8 +164,12 @@ function renderBrokerOrders() {
       <td><span class="status-pill ${row.ok ? "ok" : "bad"}">${row.dry_run ? "Preview" : (row.ok ? "Success" : "Failed")}</span></td>
       <td>${escapeHtml(row.broker_order_id || "")}</td>
       <td>${escapeHtml(row.message || "")}</td>
+      <td class="row-actions">
+        ${row.dry_run ? `<button type="button" data-remove-order>Remove</button>` : ""}
+        ${row.broker_order_id ? `<button type="button" data-cancel-order>Cancel</button>` : ""}
+      </td>
     </tr>
-  `).join("") : `<tr><td colspan="9">No broker orders recorded.</td></tr>`;
+  `).join("") : `<tr><td colspan="10">No broker orders recorded.</td></tr>`;
 }
 
 function renderHoldings(reportHoldings) {
@@ -316,6 +352,14 @@ async function refreshBrokerOrderBook() {
   $("orderBookStatus").textContent = "Broker book loaded";
 }
 
+function syncActionProductQty(select) {
+  const card = select.closest(".trade-action");
+  if (!card) return;
+  const qty = select.value === "mtf" ? card.dataset.mtfQty : card.dataset.cashQty;
+  const qtyInput = card.querySelector(".action-qty");
+  if (qtyInput && qty) qtyInput.value = qty;
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -417,8 +461,10 @@ on("iciciForm", "submit", async (event) => {
       }),
     });
     $("iciciResult").textContent = JSON.stringify(payload.test, null, 2);
+    setIciciConnection(Boolean(payload.test?.ok), payload.test?.time || "");
   } catch (error) {
     $("iciciResult").textContent = error.message;
+    setIciciConnection(false, error.message);
   }
 });
 
@@ -430,9 +476,15 @@ on("testIciciQuote", "click", async () => {
       body: JSON.stringify({ stock_code: $("iciciStock").value }),
     });
     $("iciciResult").textContent = JSON.stringify(payload.test, null, 2);
+    setIciciConnection(Boolean(payload.test?.ok), payload.test?.time || "");
   } catch (error) {
     $("iciciResult").textContent = error.message;
+    setIciciConnection(false, error.message);
   }
+});
+
+on("actionsList", "change", (event) => {
+  if (event.target.matches(".action-product")) syncActionProductQty(event.target);
 });
 
 on("actionsList", "click", (event) => {
@@ -446,6 +498,30 @@ on("actionsList", "click", (event) => {
   }
   if (event.target.matches("[data-book-ledger]")) {
     bookAction(card).catch((error) => setMessage(error.message, true));
+  }
+});
+
+on("brokerOrdersBody", "click", async (event) => {
+  const row = event.target.closest("tr");
+  if (!row) return;
+  if (event.target.matches("[data-remove-order]")) {
+    const payload = await api(`/api/broker/orders/${row.dataset.orderLogId}`, { method: "DELETE" });
+    state.brokerOrders = payload.broker_orders || [];
+    renderBrokerOrders();
+    $("orderResult").textContent = "";
+    setMessage("Preview removed.");
+  }
+  if (event.target.matches("[data-cancel-order]")) {
+    const orderId = row.dataset.brokerOrderId;
+    if (!orderId || !confirm(`Cancel broker order ${orderId}?`)) return;
+    const payload = await api("/api/icici/order/cancel", {
+      method: "POST",
+      body: JSON.stringify({ order_id: orderId, exchange_code: "NSE" }),
+    });
+    state.brokerOrders = payload.broker_orders || state.brokerOrders;
+    renderBrokerOrders();
+    $("orderResult").textContent = JSON.stringify(payload.cancel, null, 2);
+    setMessage("Cancel request sent.");
   }
 });
 

@@ -355,6 +355,16 @@ td {
   white-space: nowrap;
 }
 
+.row-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.row-actions button {
+  min-height: 32px;
+  padding: 0 9px;
+}
+
 th {
   color: var(--muted);
   font-size: 0.78rem;

@@ -90,7 +90,10 @@
       </section>
 
       <section class="panel">
-        <h2>ICICI Direct</h2>
+        <div class="panel-head">
+          <h2>ICICI Direct</h2>
+          <span id="iciciConnection" class="status-pill bad">Not connected</span>
+        </div>
         <form id="iciciForm" class="icici-grid">
           <label>
             API key
@@ -135,6 +138,7 @@
                 <th>Status</th>
                 <th>Broker ID</th>
                 <th>Message</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="brokerOrdersBody"></tbody>
