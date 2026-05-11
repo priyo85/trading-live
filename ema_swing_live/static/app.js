@@ -107,6 +107,19 @@ function renderReport(report) {
   renderSignals(report?.signal_rows || []);
 }
 
+function currentLedgerCash() {
+  const input = $("ledgerCash");
+  if (input && input.value !== "") return Number(input.value);
+  return Number(state.liveState?.cash ?? state.report?.cash ?? state.config?.initial_capital ?? 0);
+}
+
+function renderLedgerCash() {
+  const input = $("ledgerCash");
+  if (!input) return;
+  const cash = state.liveState?.cash ?? state.report?.cash ?? state.config?.initial_capital ?? "";
+  input.value = cash === "" ? "" : Number(cash).toFixed(2);
+}
+
 function renderActions(actions) {
   const target = $("actionsList");
   if (!actions.length) {
@@ -141,11 +154,14 @@ function renderActions(actions) {
           <label class="check-label mini-check"><input class="action-book" type="checkbox" checked>Book</label>
         </div>
         <div class="action-buttons">
-          <button type="button" data-preview-order>Preview</button>
-          <button class="primary" type="button" data-place-order>Place</button>
-          <button type="button" data-book-ledger>Book Ledger</button>
+          <button type="button" data-preview-order>Preview Only</button>
+          <button class="primary" type="button" data-place-order>Place Order</button>
+          <button type="button" data-book-ledger>Book Only</button>
         </div>
-        <strong class="value">${money(action.value)}</strong>
+        <div class="action-value">
+          <span>Order value</span>
+          <strong class="value">${money(action.value)}</strong>
+        </div>
       </article>
     `;
   }).join("");
@@ -173,6 +189,7 @@ function renderBrokerOrders() {
 }
 
 function renderHoldings(reportHoldings) {
+  renderLedgerCash();
   const reportBySymbol = new Map((reportHoldings || []).map((row) => [row.symbol, row]));
   const holdings = Object.values(state.liveState?.holdings || {});
   $("holdingsBody").innerHTML = holdings.length ? holdings.map((holding) => holdingRow(holding, reportBySymbol.get(holding.symbol))).join("") : `<tr><td colspan="9">No strategy holdings.</td></tr>`;
@@ -330,7 +347,7 @@ function serializeLedger() {
 
 async function saveLiveState({ holdings, trades } = {}) {
   const payload = {
-    cash: state.liveState?.cash ?? state.report?.cash ?? 0,
+    cash: currentLedgerCash(),
     holdings: holdings ?? serializeHoldings(),
     trades: trades ?? serializeLedger(),
   };
@@ -339,6 +356,8 @@ async function saveLiveState({ holdings, trades } = {}) {
     body: JSON.stringify(payload),
   });
   state.liveState = response.state;
+  $("kpiCash").textContent = money(state.liveState?.cash);
+  $("kpiHoldings").textContent = Object.keys(state.liveState?.holdings || {}).length || "-";
   renderHoldings(state.report?.holdings || []);
   renderLedger();
   setMessage("Strategy ledger saved.");
@@ -358,6 +377,14 @@ function syncActionProductQty(select) {
   const qty = select.value === "mtf" ? card.dataset.mtfQty : card.dataset.cashQty;
   const qtyInput = card.querySelector(".action-qty");
   if (qtyInput && qty) qtyInput.value = qty;
+  updateActionCardValue(card);
+}
+
+function updateActionCardValue(card) {
+  const qty = Number(card.querySelector(".action-qty")?.value || 0);
+  const price = Number(card.querySelector(".action-price")?.value || 0);
+  const value = card.querySelector(".value");
+  if (value) value.textContent = money(qty * price);
 }
 
 function escapeHtml(value) {
@@ -485,6 +512,13 @@ on("testIciciQuote", "click", async () => {
 
 on("actionsList", "change", (event) => {
   if (event.target.matches(".action-product")) syncActionProductQty(event.target);
+});
+
+on("actionsList", "input", (event) => {
+  if (event.target.matches(".action-qty, .action-price")) {
+    const card = event.target.closest(".trade-action");
+    if (card) updateActionCardValue(card);
+  }
 });
 
 on("actionsList", "click", (event) => {

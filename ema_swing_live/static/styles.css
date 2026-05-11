@@ -232,7 +232,7 @@ label {
 
 .action-card {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(280px, 1.4fr) auto auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(280px, 1.25fr) minmax(150px, auto) minmax(110px, auto);
   gap: 12px;
   align-items: center;
   padding: 12px;
@@ -272,6 +272,22 @@ label {
 .action-buttons button {
   min-height: 38px;
   padding: 0 10px;
+}
+
+.action-value {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+
+.action-value span {
+  font-size: 0.74rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.action-value strong {
+  font-size: 1rem;
 }
 
 .mini-check {
@@ -324,6 +340,18 @@ label {
 .button-row.tight {
   grid-column: auto;
   justify-content: flex-end;
+}
+
+.ledger-cash-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(240px, 1fr);
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.ledger-cash-row .hint {
+  margin: 0;
 }
 
 .side-buy {
@@ -455,5 +483,13 @@ tr:last-child td {
 
   .action-card .value {
     grid-column: auto;
+  }
+
+  .action-value {
+    justify-items: start;
+  }
+
+  .ledger-cash-row {
+    grid-template-columns: 1fr;
   }
 }

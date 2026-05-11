@@ -155,6 +155,13 @@
             <button id="saveHoldings" class="primary" type="button">Save Holdings</button>
           </div>
         </div>
+        <div class="ledger-cash-row">
+          <label>
+            Ledger cash
+            <input id="ledgerCash" inputmode="decimal">
+          </label>
+          <p class="hint">Cash is stored separately from holdings. If you remove or edit holdings manually, adjust ledger cash here and save.</p>
+        </div>
         <div class="table-wrap">
           <table class="editable-table">
             <thead>
@@ -228,6 +235,6 @@
     <script>
       window.ETF_UNIVERSE = {{ etf_universe | tojson }};
     </script>
-    <script src="{{ url_for('static', filename='app.js') }}?v=20260510-trading-workflow-3"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=20260511-ledger-cash-value"></script>
   </body>
 </html>
