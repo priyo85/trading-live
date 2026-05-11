@@ -165,8 +165,8 @@ function renderBrokerOrders() {
       <td>${escapeHtml(row.broker_order_id || "")}</td>
       <td>${escapeHtml(row.message || "")}</td>
       <td class="row-actions">
-        ${row.dry_run ? `<button type="button" data-remove-order>Remove</button>` : ""}
         ${row.broker_order_id ? `<button type="button" data-cancel-order>Cancel</button>` : ""}
+        <button type="button" data-remove-order>Remove</button>
       </td>
     </tr>
   `).join("") : `<tr><td colspan="10">No broker orders recorded.</td></tr>`;
