@@ -5,6 +5,8 @@ const state = {
   liveState: null,
   brokerOrders: [],
   iciciOrderBook: null,
+  iciciPortfolioRows: [],
+  iciciTradeRows: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -98,11 +100,17 @@ async function checkIciciConnection() {
 function renderReport(report) {
   const stateHoldings = state.liveState?.holdings || {};
   const stateHoldingCount = Object.keys(stateHoldings).length;
+  const reportHoldingsBySymbol = new Map((report?.holdings || []).map((row) => [row.symbol, row]));
   const ledgerCash = Number(state.liveState?.cash);
   const displayCash = Number.isFinite(ledgerCash) ? ledgerCash : Number(report?.cash ?? state.config?.initial_capital ?? 0);
-  const displayEquity = stateHoldingCount
-    ? Number(report?.equity ?? displayCash)
-    : displayCash;
+  const holdingsNetValue = Object.values(stateHoldings).reduce((total, holding) => {
+    const reportHolding = reportHoldingsBySymbol.get(holding.symbol) || {};
+    const price = Number(reportHolding.last_price ?? holding.entry_price ?? 0);
+    const shares = Number(holding.shares || 0);
+    const mtfLoan = Number(holding.mtf_loan || 0);
+    return total + (shares * price) - mtfLoan;
+  }, 0);
+  const displayEquity = displayCash + holdingsNetValue;
   $("kpiEquity").textContent = money(displayEquity);
   $("kpiCash").textContent = money(displayCash);
   const holdingsCount = stateHoldingCount;
@@ -195,6 +203,43 @@ function renderBrokerOrders() {
       </td>
     </tr>
   `).join("") : `<tr><td colspan="10">No broker orders recorded.</td></tr>`;
+}
+
+function renderIciciPortfolioRows(rows) {
+  const body = $("iciciPortfolioBody");
+  if (!body) return;
+  body.innerHTML = rows.length ? rows.map((row, index) => `
+    <tr data-icici-portfolio-index="${index}">
+      <td>${escapeHtml(row.source || "Portfolio")}</td>
+      <td>${escapeHtml(row.symbol || row.stock_code || "")}</td>
+      <td>${escapeHtml(row.funding_mode || row.product || "")}</td>
+      <td>${money(row.quantity)}</td>
+      <td>${money(row.price)}</td>
+      <td>${money(row.value)}</td>
+      <td>${money(row.mtf_loan)}</td>
+      <td>${money(row.margin_amount)}</td>
+      <td><button type="button" data-import-icici-holding>Import Holding</button></td>
+    </tr>
+  `).join("") : `<tr><td colspan="9">No ICICI portfolio rows returned.</td></tr>`;
+}
+
+function renderIciciTradeRows(rows) {
+  const body = $("iciciTradesBody");
+  if (!body) return;
+  body.innerHTML = rows.length ? rows.map((row, index) => `
+    <tr data-icici-trade-index="${index}">
+      <td>${escapeHtml(row.date || "")}</td>
+      <td>${escapeHtml(row.symbol || row.stock_code || "")}</td>
+      <td>${escapeHtml(row.side || "")}</td>
+      <td>${escapeHtml(row.funding_mode || row.product || "")}</td>
+      <td>${money(row.quantity)}</td>
+      <td>${money(row.price)}</td>
+      <td>${money(row.value)}</td>
+      <td>${money(row.mtf_loan)}</td>
+      <td>${escapeHtml(row.order_id || "")}</td>
+      <td><button type="button" data-import-icici-trade>Import Trade</button></td>
+    </tr>
+  `).join("") : `<tr><td colspan="10">No ICICI trade rows returned.</td></tr>`;
 }
 
 function renderHoldings(reportHoldings) {
@@ -304,7 +349,7 @@ async function placeActionOrder(card, dryRun) {
   state.brokerOrders = payload.broker_orders || state.brokerOrders;
   if (payload.state) state.liveState = payload.state;
   renderBrokerOrders();
-  renderHoldings(state.report?.holdings || []);
+  renderReport(state.report);
   renderLedger();
   setMessage(dryRun ? "Order preview ready." : "Broker order request completed.");
 }
@@ -321,7 +366,7 @@ async function bookAction(card) {
     }),
   });
   state.liveState = response.state;
-  renderHoldings(state.report?.holdings || []);
+  renderReport(state.report);
   renderLedger();
   setMessage("Action booked in the strategy ledger.");
 }
@@ -365,10 +410,7 @@ async function saveLiveState({ holdings, trades } = {}) {
     body: JSON.stringify(payload),
   });
   state.liveState = response.state;
-  $("kpiCash").textContent = money(state.liveState?.cash);
-  const holdingsCount = Object.keys(state.liveState?.holdings || {}).length;
-  $("kpiEquity").textContent = holdingsCount ? $("kpiEquity").textContent : money(state.liveState?.cash);
-  $("kpiHoldings").textContent = holdingsCount || "-";
+  renderReport(state.report);
   renderHoldings(state.report?.holdings || []);
   renderLedger();
   setMessage("Strategy ledger saved.");
@@ -386,6 +428,55 @@ async function refreshBrokerOrderBook() {
   state.iciciOrderBook = payload.orders;
   $("orderResult").textContent = JSON.stringify(payload.orders, null, 2);
   $("orderBookStatus").textContent = "Broker book loaded";
+}
+
+async function loadIciciPortfolio() {
+  $("iciciPortfolioStatus").textContent = "Loading...";
+  const payload = await api("/api/icici/portfolio");
+  const holdingRows = payload.portfolio_holdings?.rows || [];
+  const positionRows = payload.positions?.rows || [];
+  state.iciciPortfolioRows = [
+    ...holdingRows.map((row) => ({ ...row, source: "Holdings" })),
+    ...positionRows.map((row) => ({ ...row, source: "Positions" })),
+  ].filter((row) => row.symbol && Number(row.quantity || 0) > 0);
+  renderIciciPortfolioRows(state.iciciPortfolioRows);
+  $("iciciResult").textContent = JSON.stringify(payload.funds?.response || payload, null, 2);
+  $("iciciPortfolioStatus").textContent = `${state.iciciPortfolioRows.length} rows`;
+}
+
+async function loadIciciTrades() {
+  $("iciciTradesStatus").textContent = "Loading...";
+  const payload = await api("/api/icici/trades");
+  state.iciciTradeRows = (payload.trades?.rows || []).filter((row) => row.symbol && Number(row.quantity || 0) > 0);
+  renderIciciTradeRows(state.iciciTradeRows);
+  $("iciciResult").textContent = JSON.stringify(payload.trades?.response || payload, null, 2);
+  $("iciciTradesStatus").textContent = `${state.iciciTradeRows.length} rows`;
+}
+
+async function importIciciHolding(index) {
+  const row = state.iciciPortfolioRows[index];
+  if (!row) return;
+  const payload = await api("/api/icici/import/holding", {
+    method: "POST",
+    body: JSON.stringify({ row }),
+  });
+  state.liveState = payload.state;
+  renderReport(state.report);
+  renderLedger();
+  setMessage(`Imported ${row.symbol} into strategy holdings.`);
+}
+
+async function importIciciTrade(index) {
+  const row = state.iciciTradeRows[index];
+  if (!row) return;
+  const payload = await api("/api/icici/import/trade", {
+    method: "POST",
+    body: JSON.stringify({ row }),
+  });
+  state.liveState = payload.state;
+  renderReport(state.report);
+  renderLedger();
+  setMessage(`Imported ${row.symbol} trade into strategy ledger.`);
 }
 
 function syncActionProductQty(select) {
@@ -444,6 +535,14 @@ on("refreshOrderBook", "click", () => {
   refreshBrokerOrderBook().catch((error) => setMessage(error.message, true));
 });
 
+on("loadIciciPortfolio", "click", () => {
+  loadIciciPortfolio().catch((error) => setMessage(error.message, true));
+});
+
+on("loadIciciTrades", "click", () => {
+  loadIciciTrades().catch((error) => setMessage(error.message, true));
+});
+
 on("clearLedger", "click", async () => {
   if (!confirm("Clear the local strategy ledger?")) return;
   try {
@@ -472,13 +571,10 @@ on("configForm", "submit", async (event) => {
     });
     state.config = payload.config;
     state.settings = payload.settings;
+    if (payload.live_state) state.liveState = payload.live_state;
     renderConfig(payload.config);
-    const hasHoldings = Object.keys(state.liveState?.holdings || {}).length > 0;
-    if (!hasHoldings) {
-      await resetLedgerCashToInitialCapital();
-    } else {
-      setMessage("Configuration saved. Existing ledger cash was kept because holdings exist.");
-    }
+    renderReport(state.report);
+    setMessage("Configuration saved. Ledger cash adjusted by the capital change.");
   } catch (error) {
     setMessage(error.message, true);
   }
@@ -579,6 +675,18 @@ on("brokerOrdersBody", "click", async (event) => {
     $("orderResult").textContent = JSON.stringify(payload.cancel, null, 2);
     setMessage("Cancel request sent.");
   }
+});
+
+on("iciciPortfolioBody", "click", (event) => {
+  const row = event.target.closest("tr");
+  if (!row || !event.target.matches("[data-import-icici-holding]")) return;
+  importIciciHolding(Number(row.dataset.iciciPortfolioIndex)).catch((error) => setMessage(error.message, true));
+});
+
+on("iciciTradesBody", "click", (event) => {
+  const row = event.target.closest("tr");
+  if (!row || !event.target.matches("[data-import-icici-trade]")) return;
+  importIciciTrade(Number(row.dataset.iciciTradeIndex)).catch((error) => setMessage(error.message, true));
 });
 
 document.body.addEventListener("click", (event) => {

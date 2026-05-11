@@ -115,9 +115,66 @@
             <button id="openIciciLogin" type="button">Open Login</button>
             <button class="primary" type="submit">Save & Test</button>
             <button id="testIciciQuote" type="button">Test Quote</button>
+            <button id="loadIciciPortfolio" type="button">Load Portfolio</button>
+            <button id="loadIciciTrades" type="button">Load Trades</button>
           </div>
         </form>
         <pre id="iciciResult" class="result-box"></pre>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>ICICI Portfolio Import</h2>
+          <span id="iciciPortfolioStatus" class="soft-status"></span>
+        </div>
+        <div class="table-wrap import-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Symbol</th>
+                <th>Product</th>
+                <th>Qty</th>
+                <th>Avg</th>
+                <th>Value</th>
+                <th>MTF Loan</th>
+                <th>Margin</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="iciciPortfolioBody">
+              <tr><td colspan="9">Load ICICI portfolio to import holdings.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>ICICI Trade Book Import</h2>
+          <span id="iciciTradesStatus" class="soft-status"></span>
+        </div>
+        <div class="table-wrap import-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Product</th>
+                <th>Qty</th>
+                <th>Price</th>
+                <th>Value</th>
+                <th>MTF Loan</th>
+                <th>Order ID</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="iciciTradesBody">
+              <tr><td colspan="10">Load ICICI trades to import executed orders.</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section class="panel">
@@ -235,6 +292,6 @@
     <script>
       window.ETF_UNIVERSE = {{ etf_universe | tojson }};
     </script>
-    <script src="{{ url_for('static', filename='app.js') }}?v=20260511-ledger-cash-value"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=20260511-icici-import"></script>
   </body>
 </html>

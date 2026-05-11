@@ -413,6 +413,15 @@ td {
   padding: 0 9px;
 }
 
+.import-table table {
+  min-width: 920px;
+}
+
+.import-table button {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
 th {
   color: var(--muted);
   font-size: 0.78rem;

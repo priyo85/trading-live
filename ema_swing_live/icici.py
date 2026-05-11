@@ -207,7 +207,75 @@ def order_book(exchange_code: str = "NSE", from_date: str | None = None, to_date
         from_date=from_date or _breeze_datetime(today - timedelta(days=10)),
         to_date=to_date or _breeze_datetime(today),
     )
-    return {"ok": _response_ok(response), "response": _safe_response(response)}
+    return {"ok": _response_ok(response), "response": _safe_response(response, truncate_success=False)}
+
+
+def funds() -> dict[str, Any]:
+    response = _client().get_funds()
+    return {"ok": _response_ok(response), "response": _safe_response(response, truncate_success=False)}
+
+
+def demat_holdings() -> dict[str, Any]:
+    response = _client().get_demat_holdings()
+    return {"ok": _response_ok(response), "response": _safe_response(response, truncate_success=False)}
+
+
+def portfolio_holdings(
+    exchange_code: str = "NSE",
+    from_date: str | None = None,
+    to_date: str | None = None,
+    stock_code: str = "",
+    portfolio_type: str = "",
+) -> dict[str, Any]:
+    today = date.today()
+    response = _client().get_portfolio_holdings(
+        exchange_code=str(exchange_code or "NSE").upper(),
+        from_date=from_date or _breeze_datetime(today - timedelta(days=30)),
+        to_date=to_date or _breeze_datetime(today),
+        stock_code=_stock_code(stock_code) if stock_code else "",
+        portfolio_type=str(portfolio_type or ""),
+    )
+    rows = _success_rows(response)
+    return {
+        "ok": _response_ok(response),
+        "rows": [_normalized_broker_position(row) for row in rows],
+        "response": _safe_response(response, truncate_success=False),
+    }
+
+
+def portfolio_positions() -> dict[str, Any]:
+    response = _client().get_portfolio_positions()
+    rows = _success_rows(response)
+    return {
+        "ok": _response_ok(response),
+        "rows": [_normalized_broker_position(row) for row in rows],
+        "response": _safe_response(response, truncate_success=False),
+    }
+
+
+def trade_book(
+    exchange_code: str = "NSE",
+    from_date: str | None = None,
+    to_date: str | None = None,
+    product_type: str = "",
+    action: str = "",
+    stock_code: str = "",
+) -> dict[str, Any]:
+    today = date.today()
+    response = _client().get_trade_list(
+        from_date=from_date or _breeze_datetime(today - timedelta(days=10)),
+        to_date=to_date or _breeze_datetime(today),
+        exchange_code=str(exchange_code or "NSE").upper(),
+        product_type=str(product_type or ""),
+        action=str(action or ""),
+        stock_code=_stock_code(stock_code) if stock_code else "",
+    )
+    rows = _success_rows(response)
+    return {
+        "ok": _response_ok(response),
+        "rows": [_normalized_broker_trade(row) for row in rows],
+        "response": _safe_response(response, truncate_success=False),
+    }
 
 
 def cancel_order(exchange_code: str, order_id: str) -> dict[str, Any]:
@@ -425,10 +493,133 @@ def _validate_real_gtt_payload(payload: dict[str, Any]) -> None:
         )
 
 
-def _safe_response(response: Any) -> Any:
+def _success_rows(response: Any) -> list[dict[str, Any]]:
+    if not isinstance(response, dict):
+        return []
+    success = response.get("Success")
+    if isinstance(success, list):
+        return [row for row in success if isinstance(row, dict)]
+    if isinstance(success, dict):
+        for value in success.values():
+            if isinstance(value, list):
+                return [row for row in value if isinstance(row, dict)]
+        return [success]
+    return []
+
+
+def _normalized_broker_position(row: dict[str, Any]) -> dict[str, Any]:
+    stock_code = _first_text(row, "stock_code", "stockCode", "scrip_code", "scripCode", "symbol", "scrip_name")
+    quantity = _first_number(row, "quantity", "total_quantity", "holding_quantity", "available_quantity", "open_quantity", "net_quantity", "qty")
+    price = _first_number(row, "average_price", "average_cost", "average_buy_rate", "avg_price", "avg_rate", "buy_avg", "price")
+    product = _first_text(row, "product_type", "product", "portfolio_type", "segment")
+    value = _first_number(row, "value", "market_value", "buy_value", "cost_value")
+    if value <= 0 and quantity > 0 and price > 0:
+        value = quantity * price
+    margin_amount = _first_number(row, "margin_amount", "marginAmount", "amount_blocked", "total_amount_blocked")
+    mtf_loan = _broker_mtf_loan(row, value=value, margin_amount=margin_amount)
+    return {
+        "symbol": _strategy_symbol(stock_code),
+        "stock_code": stock_code,
+        "quantity": quantity,
+        "price": price,
+        "value": value,
+        "product": product,
+        "funding_mode": "mtf" if _looks_mtf(row) else "delivery",
+        "mtf_loan": mtf_loan,
+        "margin_amount": margin_amount,
+        "raw": row,
+    }
+
+
+def _normalized_broker_trade(row: dict[str, Any]) -> dict[str, Any]:
+    stock_code = _first_text(row, "stock_code", "stockCode", "scrip_code", "scripCode", "symbol", "scrip_name")
+    quantity = _first_number(row, "executed_quantity", "quantity", "traded_quantity", "qty", "open_quantity")
+    price = _first_number(row, "average_executed_rate", "averageExecutedRate", "trade_price", "executed_price", "price", "rate")
+    product = _first_text(row, "product_type", "product", "portfolio_type", "segment")
+    value = _first_number(row, "value", "trade_value", "amount", "order_value")
+    if value <= 0 and quantity > 0 and price > 0:
+        value = quantity * price
+    margin_amount = _first_number(row, "margin_amount", "marginAmount", "amount_blocked", "total_amount_blocked")
+    return {
+        "date": _first_text(row, "trade_date", "tradeDate", "order_date", "orderDate", "exchange_time", "datetime"),
+        "symbol": _strategy_symbol(stock_code),
+        "stock_code": stock_code,
+        "side": _broker_side(row),
+        "quantity": quantity,
+        "price": price,
+        "value": value,
+        "product": product,
+        "funding_mode": "mtf" if _looks_mtf(row) else "delivery",
+        "mtf_loan": _broker_mtf_loan(row, value=value, margin_amount=margin_amount),
+        "margin_amount": margin_amount,
+        "order_id": _first_text(row, "order_id", "orderId", "order_reference", "orderReference"),
+        "raw": row,
+    }
+
+
+def _first_text(row: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value not in {None, ""}:
+            return str(value).strip()
+    return ""
+
+
+def _first_number(row: dict[str, Any], *keys: str) -> float:
+    for key in keys:
+        value = row.get(key)
+        if value in {None, ""}:
+            continue
+        try:
+            return float(str(value).replace(",", "").strip())
+        except ValueError:
+            continue
+    return 0.0
+
+
+def _looks_mtf(row: dict[str, Any]) -> bool:
+    text = " ".join(str(value).lower() for value in row.values() if isinstance(value, (str, int, float)))
+    return "mtf" in text or "margin trading" in text
+
+
+def _broker_mtf_loan(row: dict[str, Any], *, value: float, margin_amount: float) -> float:
+    direct = _first_number(row, "mtf_loan", "loan_amount", "funded_amount", "funded_value", "broker_funded_amount")
+    if direct > 0:
+        return direct
+    if _looks_mtf(row) and value > 0 and margin_amount > 0:
+        return max(value - margin_amount, 0.0)
+    return 0.0
+
+
+def _broker_side(row: dict[str, Any]) -> str:
+    text = _first_text(row, "action", "order_flow", "orderFlow", "side", "buy_sell")
+    normalized = text.strip().upper()
+    if normalized in {"B", "BUY"}:
+        return "BUY"
+    if normalized in {"S", "SELL"}:
+        return "SELL"
+    if "BUY" in normalized:
+        return "BUY"
+    if "SELL" in normalized:
+        return "SELL"
+    return normalized or "BUY"
+
+
+def _strategy_symbol(stock_code: str) -> str:
+    code = str(stock_code or "").strip().upper()
+    if not code:
+        return ""
+    if code.startswith("NSE:"):
+        return code
+    if code.endswith(".NS"):
+        code = code[:-3]
+    return f"NSE:{code}"
+
+
+def _safe_response(response: Any, *, truncate_success: bool = True) -> Any:
     if not isinstance(response, dict):
         return str(response)
     cleaned = dict(response)
-    if "Success" in cleaned and isinstance(cleaned["Success"], list):
+    if truncate_success and "Success" in cleaned and isinstance(cleaned["Success"], list):
         cleaned["Success"] = cleaned["Success"][:2]
     return cleaned

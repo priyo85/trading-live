@@ -83,6 +83,8 @@ def create_app() -> Flask:
         payload = request.get_json(silent=True) or {}
         try:
             config = _load_live_config()
+            old_initial_capital = float(config.get("initial_capital", 0) or 0)
+            capital_delta = 0.0
             settings_updates: dict[str, Any] = {}
 
             if "initial_capital" in payload:
@@ -90,6 +92,7 @@ def create_app() -> Flask:
                 if initial_capital <= 0:
                     raise ValueError("Initial capital must be greater than zero.")
                 config["initial_capital"] = initial_capital
+                capital_delta = initial_capital - old_initial_capital
 
             if "max_positions" in payload:
                 max_positions = int(payload.get("max_positions"))
@@ -107,12 +110,13 @@ def create_app() -> Flask:
                 settings_updates["data_provider"] = "icici" if provider in {"breeze", "icici_breeze"} else provider
 
             save_json(LIVE_CONFIG_PATH, config)
+            live_state = _apply_capital_delta(capital_delta, old_initial_capital, config)
             settings = save_settings(settings_updates) if settings_updates else load_settings()
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             return jsonify({"error": f"Live config update failed: {exc}"}), 500
-        return jsonify({"config": config, "settings": settings})
+        return jsonify({"config": config, "settings": settings, "live_state": live_state})
 
     @app.get("/api/live/report")
     @_login_required
@@ -351,6 +355,70 @@ def create_app() -> Flask:
             return jsonify({"error": f"ICICI order book failed: {exc}"}), 500
         return jsonify({"orders": orders})
 
+    @app.get("/api/icici/portfolio")
+    @_login_required
+    def api_icici_portfolio():
+        try:
+            payload = {
+                "funds": icici.funds(),
+                "demat_holdings": icici.demat_holdings(),
+                "portfolio_holdings": icici.portfolio_holdings(
+                    exchange_code=str(request.args.get("exchange_code", "NSE")),
+                    from_date=_optional_text(request.args.get("from_date")),
+                    to_date=_optional_text(request.args.get("to_date")),
+                    stock_code=str(request.args.get("stock_code", "")),
+                    portfolio_type=str(request.args.get("portfolio_type", "")),
+                ),
+                "positions": icici.portfolio_positions(),
+            }
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"ICICI portfolio fetch failed: {exc}"}), 500
+        return jsonify(payload)
+
+    @app.get("/api/icici/trades")
+    @_login_required
+    def api_icici_trades():
+        try:
+            trades = icici.trade_book(
+                exchange_code=str(request.args.get("exchange_code", "NSE")),
+                from_date=_optional_text(request.args.get("from_date")),
+                to_date=_optional_text(request.args.get("to_date")),
+                product_type=str(request.args.get("product_type", "")),
+                action=str(request.args.get("action", "")),
+                stock_code=str(request.args.get("stock_code", "")),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"ICICI trade book fetch failed: {exc}"}), 500
+        return jsonify({"trades": trades})
+
+    @app.post("/api/icici/import/holding")
+    @_login_required
+    def api_icici_import_holding():
+        payload = request.get_json(silent=True) or {}
+        try:
+            state = _import_broker_holding(payload.get("row") or payload)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"ICICI holding import failed: {exc}"}), 500
+        return jsonify({"state": state})
+
+    @app.post("/api/icici/import/trade")
+    @_login_required
+    def api_icici_import_trade():
+        payload = request.get_json(silent=True) or {}
+        try:
+            state = _import_broker_trade(payload.get("row") or payload)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"ICICI trade import failed: {exc}"}), 500
+        return jsonify({"state": state})
+
     @app.post("/api/icici/order/cancel")
     @_login_required
     def api_icici_order_cancel():
@@ -455,6 +523,23 @@ def _load_live_state() -> dict[str, Any]:
     return load_live_state(LIVE_STATE_PATH, initial_capital=float(config.get("initial_capital", 0)))
 
 
+def _apply_capital_delta(capital_delta: float, old_initial_capital: float, config: dict[str, Any]) -> dict[str, Any]:
+    state = load_live_state(LIVE_STATE_PATH, initial_capital=old_initial_capital)
+    if abs(capital_delta) < 0.005:
+        return state
+    state["cash"] = float(state.get("cash", old_initial_capital) or 0) + capital_delta
+    state.setdefault("capital_adjustments", []).append(
+        {
+            "date": datetime.now().date().isoformat(),
+            "amount": capital_delta,
+            "reason": "initial_capital_update",
+            "initial_capital": float(config.get("initial_capital", 0) or 0),
+        }
+    )
+    save_live_state(state, LIVE_STATE_PATH)
+    return state
+
+
 def _load_broker_orders() -> list[dict[str, Any]]:
     data = load_json(BROKER_ORDERS_PATH, {"orders": []})
     orders = data.get("orders", [])
@@ -530,6 +615,92 @@ def _book_report_action(action_id: str, quantity: Any, price: Any, product: str,
     return state
 
 
+def _import_broker_holding(row: Any) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        raise ValueError("Broker holding row is required.")
+    symbol = str(row.get("symbol", "")).strip().upper()
+    if not symbol:
+        raise ValueError("Broker row has no symbol.")
+    shares = int(_positive_number(row.get("quantity"), f"{symbol} quantity"))
+    price = _positive_number(row.get("price"), f"{symbol} price")
+    value = float(row.get("value", shares * price) or shares * price)
+    funding_mode = "mtf" if str(row.get("funding_mode", "")).lower() == "mtf" else "delivery"
+    mtf_loan = float(row.get("mtf_loan", 0) or 0)
+    margin_amount = float(row.get("margin_amount", 0) or 0)
+    if funding_mode == "mtf" and mtf_loan <= 0 and margin_amount > 0:
+        mtf_loan = max(value - margin_amount, 0.0)
+
+    config = _load_live_config()
+    state = _load_live_state()
+    holdings = state.setdefault("holdings", {})
+    previous = holdings.get(symbol)
+    previous_cash_required = 0.0
+    if previous:
+        previous_cash_required = float(previous.get("cost_basis", 0) or 0) - float(previous.get("mtf_loan", 0) or 0)
+    cash_required = value - mtf_loan if funding_mode == "mtf" else value
+    holdings[symbol] = {
+        "symbol": symbol,
+        "shares": shares,
+        "entry_price": price,
+        "entry_date": datetime.now().date().isoformat(),
+        "cost_basis": value,
+        "funding_mode": funding_mode,
+        "mtf_loan": mtf_loan,
+    }
+    state["cash"] = float(state.get("cash", config["initial_capital"]) or 0) + previous_cash_required - cash_required
+    save_live_state(state, LIVE_STATE_PATH)
+    return state
+
+
+def _import_broker_trade(row: Any) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        raise ValueError("Broker trade row is required.")
+    action = _broker_row_action(row)
+    config = _load_live_config()
+    state = _load_live_state()
+    if action["side"] == "SELL":
+        holding = state.get("holdings", {}).get(action["symbol"], {})
+        action["mtf_loan_repayment"] = float(holding.get("mtf_loan", 0) or 0)
+        action["cash_delta"] = float(action["value"]) - float(action["mtf_loan_repayment"])
+        action["profit"] = float(action["value"]) - float(holding.get("cost_basis", action["value"]) or action["value"])
+    _apply_actions(state, [action], config)
+    save_live_state(state, LIVE_STATE_PATH)
+    return state
+
+
+def _broker_row_action(row: dict[str, Any]) -> dict[str, Any]:
+    symbol = str(row.get("symbol", "")).strip().upper()
+    side = str(row.get("side", "")).strip().upper()
+    if not symbol:
+        raise ValueError("Broker trade row has no symbol.")
+    if side not in {"BUY", "SELL"}:
+        raise ValueError("Broker trade row must be BUY or SELL.")
+    shares = int(_positive_number(row.get("quantity"), f"{symbol} quantity"))
+    price = _positive_number(row.get("price"), f"{symbol} price")
+    value = float(row.get("value", shares * price) or shares * price)
+    funding_mode = "mtf" if str(row.get("funding_mode", "")).lower() == "mtf" else "delivery"
+    mtf_loan = float(row.get("mtf_loan", 0) or 0)
+    margin_amount = float(row.get("margin_amount", 0) or 0)
+    if funding_mode == "mtf" and mtf_loan <= 0 and margin_amount > 0:
+        mtf_loan = max(value - margin_amount, 0.0)
+    if funding_mode == "mtf" and mtf_loan <= 0 and side == "BUY":
+        raise ValueError("ICICI row did not include MTF loan or margin amount. Import from Portfolio after ICICI updates the position.")
+    return {
+        "side": side,
+        "symbol": symbol,
+        "date": _date_text(row.get("date")),
+        "signal_date": _date_text(row.get("date")),
+        "price": price,
+        "shares": shares,
+        "value": value,
+        "cash_required": value - mtf_loan if funding_mode == "mtf" else value,
+        "funding_mode": funding_mode,
+        "mtf_loan": mtf_loan,
+        "broker_order_id": str(row.get("order_id", "")).strip(),
+        "reason": "icici_import",
+    }
+
+
 def _action_with_order_values(action: dict[str, Any], state: dict[str, Any], quantity: Any, price: Any, product: str, broker_order_id: str) -> dict[str, Any]:
     booked = dict(action)
     shares = int(_positive_number(quantity if quantity is not None else action.get("shares"), "Quantity"))
@@ -555,6 +726,11 @@ def _action_with_order_values(action: dict[str, Any], state: dict[str, Any], qua
         booked["cash_delta"] = value - mtf_loan
         booked["profit"] = value - cost_basis
     return booked
+
+
+def _date_text(value: Any) -> str:
+    text = str(value or "").strip()
+    return text[:10] if text else datetime.now().date().isoformat()
 
 
 def _normalize_live_state(payload: dict[str, Any]) -> dict[str, Any]:
