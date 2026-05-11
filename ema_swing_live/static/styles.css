@@ -232,7 +232,10 @@ label {
 
 .action-card {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(280px, 1.25fr) minmax(150px, auto) minmax(110px, auto);
+  grid-template-columns: minmax(150px, 0.9fr) minmax(360px, 1.6fr) minmax(110px, auto);
+  grid-template-areas:
+    "summary controls value"
+    "summary buttons value";
   gap: 12px;
   align-items: center;
   padding: 12px;
@@ -250,11 +253,18 @@ label {
   font-size: 0.86rem;
 }
 
+.action-summary {
+  grid-area: summary;
+  min-width: 0;
+}
+
 .action-controls {
+  grid-area: controls;
   display: grid;
-  grid-template-columns: repeat(4, minmax(74px, 1fr));
+  grid-template-columns: minmax(70px, 0.75fr) minmax(76px, 0.85fr) minmax(92px, 0.95fr) minmax(150px, 1.2fr);
   gap: 8px;
   align-items: end;
+  min-width: 0;
 }
 
 .action-controls input,
@@ -264,6 +274,7 @@ label {
 }
 
 .action-buttons {
+  grid-area: buttons;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -275,6 +286,7 @@ label {
 }
 
 .action-value {
+  grid-area: value;
   display: grid;
   justify-items: end;
   gap: 3px;
@@ -293,6 +305,14 @@ label {
 .mini-check {
   min-height: 38px;
   gap: 6px;
+  align-self: end;
+  white-space: nowrap;
+}
+
+.mini-check span {
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 700;
 }
 
 .soft-status {
@@ -471,6 +491,11 @@ tr:last-child td {
 
   .action-card {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "summary"
+      "controls"
+      "buttons"
+      "value";
   }
 
   .action-controls {

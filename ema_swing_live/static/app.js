@@ -96,10 +96,16 @@ async function checkIciciConnection() {
 }
 
 function renderReport(report) {
-  $("kpiEquity").textContent = money(report?.equity);
-  $("kpiCash").textContent = money(report?.cash ?? state.liveState?.cash);
   const stateHoldings = state.liveState?.holdings || {};
-  const holdingsCount = report?.holdings?.length ?? Object.keys(stateHoldings).length;
+  const stateHoldingCount = Object.keys(stateHoldings).length;
+  const ledgerCash = Number(state.liveState?.cash);
+  const displayCash = Number.isFinite(ledgerCash) ? ledgerCash : Number(report?.cash ?? state.config?.initial_capital ?? 0);
+  const displayEquity = stateHoldingCount
+    ? Number(report?.equity ?? displayCash)
+    : displayCash;
+  $("kpiEquity").textContent = money(displayEquity);
+  $("kpiCash").textContent = money(displayCash);
+  const holdingsCount = stateHoldingCount;
   $("kpiHoldings").textContent = holdingsCount || "-";
   $("kpiRun").textContent = report?.data_as_of ? `${report.run_date || "-"} / data ${report.data_as_of}` : (report?.run_date || "-");
   renderActions(report?.actions || []);
@@ -138,7 +144,7 @@ function renderActions(actions) {
     const mtfQty = action.price > 0 ? Math.max(Math.floor(cappedMtfBudget / action.price), 1) : action.shares;
     return `
       <article class="action-card trade-action" data-action-id="${escapeAttr(action.id || "")}" data-cash-qty="${escapeAttr(action.shares || 0)}" data-mtf-qty="${escapeAttr(mtfQty || action.shares || 0)}">
-        <div>
+        <div class="action-summary">
           <strong class="${action.side === "BUY" ? "side-buy" : "side-sell"}">${escapeHtml(action.side)} ${escapeHtml(action.symbol)}</strong>
           <span>${escapeHtml(action.reason || "")}${sourceSummary(rowsBySymbol.get(action.symbol))}</span>
         </div>
@@ -151,7 +157,10 @@ function renderActions(actions) {
               <option value="mtf" ${product === "mtf" ? "selected" : ""}>MTF</option>
             </select>
           </label>
-          <label class="check-label mini-check"><input class="action-book" type="checkbox" checked>Book</label>
+          <label class="check-label mini-check" title="After a successful broker order, also update the strategy ledger.">
+            <input class="action-book" type="checkbox" checked>
+            <span>Book after place</span>
+          </label>
         </div>
         <div class="action-buttons">
           <button type="button" data-preview-order>Preview Only</button>
@@ -357,10 +366,18 @@ async function saveLiveState({ holdings, trades } = {}) {
   });
   state.liveState = response.state;
   $("kpiCash").textContent = money(state.liveState?.cash);
-  $("kpiHoldings").textContent = Object.keys(state.liveState?.holdings || {}).length || "-";
+  const holdingsCount = Object.keys(state.liveState?.holdings || {}).length;
+  $("kpiEquity").textContent = holdingsCount ? $("kpiEquity").textContent : money(state.liveState?.cash);
+  $("kpiHoldings").textContent = holdingsCount || "-";
   renderHoldings(state.report?.holdings || []);
   renderLedger();
   setMessage("Strategy ledger saved.");
+}
+
+async function resetLedgerCashToInitialCapital() {
+  $("ledgerCash").value = Number($("initialCapital").value || 0).toFixed(2);
+  await saveLiveState();
+  setMessage("Configuration saved. Ledger cash reset from initial capital. Run signals to recalculate actions.");
 }
 
 async function refreshBrokerOrderBook() {
@@ -456,7 +473,12 @@ on("configForm", "submit", async (event) => {
     state.config = payload.config;
     state.settings = payload.settings;
     renderConfig(payload.config);
-    setMessage("Configuration saved.");
+    const hasHoldings = Object.keys(state.liveState?.holdings || {}).length > 0;
+    if (!hasHoldings) {
+      await resetLedgerCashToInitialCapital();
+    } else {
+      setMessage("Configuration saved. Existing ledger cash was kept because holdings exist.");
+    }
   } catch (error) {
     setMessage(error.message, true);
   }
