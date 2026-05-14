@@ -109,9 +109,11 @@ def test_icici_portfolio_position_maps_alias_and_derives_mtf_loan():
             "quantity": "185",
             "average_price": "539.88",
             "margin_amount": "24320.24",
+            "buy_date": "2026-05-09T09:15:00",
         }
     )
 
+    assert row["date"] == "2026-05-09"
     assert row["symbol"] == "NSE:HNGSNGBEES"
     assert row["funding_mode"] == "mtf"
     assert round(row["value"], 2) == 99877.80

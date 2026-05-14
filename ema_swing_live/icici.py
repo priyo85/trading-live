@@ -519,6 +519,7 @@ def _normalized_broker_position(row: dict[str, Any]) -> dict[str, Any]:
     funding_mode = "mtf" if _looks_mtf(row, value=value, margin_amount=margin_amount) else "delivery"
     mtf_loan = _broker_mtf_loan(row, value=value, margin_amount=margin_amount)
     return {
+        "date": _broker_date(row),
         "symbol": _strategy_symbol(stock_code),
         "stock_code": stock_code,
         "quantity": quantity,
@@ -543,7 +544,7 @@ def _normalized_broker_trade(row: dict[str, Any]) -> dict[str, Any]:
     margin_amount = _first_number(row, "margin_amount", "marginAmount", "amount_blocked", "total_amount_blocked")
     funding_mode = "mtf" if _looks_mtf(row, value=value, margin_amount=margin_amount) else "delivery"
     return {
-        "date": _first_text(row, "trade_date", "tradeDate", "order_date", "orderDate", "exchange_time", "datetime"),
+        "date": _broker_date(row),
         "symbol": _strategy_symbol(stock_code),
         "stock_code": stock_code,
         "side": _broker_side(row),
@@ -577,6 +578,27 @@ def _first_number(row: dict[str, Any], *keys: str) -> float:
         except ValueError:
             continue
     return 0.0
+
+
+def _broker_date(row: dict[str, Any]) -> str:
+    text = _first_text(
+        row,
+        "buy_date",
+        "buyDate",
+        "purchase_date",
+        "purchaseDate",
+        "trade_date",
+        "tradeDate",
+        "order_date",
+        "orderDate",
+        "exchange_time",
+        "exchangeTime",
+        "datetime",
+        "created_at",
+        "createdAt",
+        "expiry_date",
+    )
+    return text[:10] if text else ""
 
 
 def _looks_mtf(row: dict[str, Any], *, value: float = 0.0, margin_amount: float = 0.0) -> bool:

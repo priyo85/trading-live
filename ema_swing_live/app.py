@@ -877,11 +877,12 @@ def _import_broker_holding(row: Any, broker: str = "icici") -> dict[str, Any]:
         previous_cash_required = float(previous.get("cost_basis", 0) or 0) - float(previous.get("mtf_loan", 0) or 0)
     cash_required = value - mtf_loan if funding_mode == "mtf" else value
     signal_details = _latest_signal_details(symbol)
+    entry_date = _date_text(row.get("date") or row.get("buy_date") or row.get("purchase_date"))
     holdings[symbol] = {
         "symbol": symbol,
         "shares": shares,
         "entry_price": price,
-        "entry_date": datetime.now().date().isoformat(),
+        "entry_date": entry_date,
         "cost_basis": value,
         "funding_mode": funding_mode,
         "mtf_loan": mtf_loan,

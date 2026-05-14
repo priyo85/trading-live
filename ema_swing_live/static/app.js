@@ -131,7 +131,7 @@ async function checkIciciConnection() {
 function renderReport(report) {
   const stateHoldings = state.liveState?.holdings || {};
   const stateHoldingCount = Object.keys(stateHoldings).length;
-  const reportHoldingsBySymbol = new Map((report?.holdings || []).map((row) => [row.symbol, row]));
+  const reportHoldingsBySymbol = marketRowsBySymbol(report);
   const ledgerCash = Number(state.liveState?.cash);
   const displayCash = Number.isFinite(ledgerCash) ? ledgerCash : Number(report?.cash ?? state.config?.initial_capital ?? 0);
   const holdingsNetValue = Object.values(stateHoldings).reduce((total, holding) => {
@@ -242,6 +242,7 @@ function renderIciciPortfolioRows(rows) {
   body.innerHTML = rows.length ? rows.map((row, index) => `
     <tr data-icici-portfolio-index="${index}">
       <td>${escapeHtml(row.source || "Portfolio")}</td>
+      <td>${escapeHtml(portfolioBuyDate(row) || "")}</td>
       <td>${escapeHtml(row.symbol || row.stock_code || "")}</td>
       <td>${escapeHtml(row.funding_mode || row.product || "")}</td>
       <td>${money(row.quantity)}</td>
@@ -251,7 +252,7 @@ function renderIciciPortfolioRows(rows) {
       <td>${money(row.mtf_loan)}</td>
       <td><button type="button" data-import-icici-holding>Import Holding</button></td>
     </tr>
-  `).join("") : `<tr><td colspan="9">No portfolio rows returned.</td></tr>`;
+  `).join("") : `<tr><td colspan="10">No portfolio rows returned.</td></tr>`;
 }
 
 function renderTradeRows(bodyId, rows, datasetName, buttonAttr) {
@@ -320,7 +321,7 @@ function renderDhanPortfolioRows(rows) {
 
 function renderHoldings(reportHoldings) {
   renderLedgerCash();
-  const reportBySymbol = new Map((reportHoldings || []).map((row) => [row.symbol, row]));
+  const reportBySymbol = marketRowsBySymbol(state.report, reportHoldings);
   const holdings = Object.values(state.liveState?.holdings || {});
   $("holdingsBody").innerHTML = holdings.length ? holdings.map((holding) => holdingRow(holding, reportBySymbol.get(holding.symbol))).join("") : `<tr><td colspan="16">No strategy holdings.</td></tr>`;
 }
@@ -330,7 +331,7 @@ function holdingRow(holding = {}, report = {}) {
   const shares = Number(holding.shares || 0);
   const entry = Number(holding.entry_price || 0);
   const invested = Number(holding.cost_basis || shares * entry);
-  const cmp = Number(report.last_price ?? entry);
+  const cmp = Number(report.last_price ?? report.price ?? entry);
   const mtfLoan = Number(holding.mtf_loan || 0);
   const gain = (shares * cmp) - invested;
   const gainPct = invested > 0 ? gain / invested : 0;
@@ -359,6 +360,19 @@ function holdingRow(holding = {}, report = {}) {
       <td><button type="button" data-remove-row>Remove</button></td>
     </tr>
   `;
+}
+
+function marketRowsBySymbol(report, reportHoldings = null) {
+  const rows = new Map();
+  (report?.signal_rows || []).forEach((row) => {
+    if (!row.symbol) return;
+    rows.set(row.symbol, { ...row, last_price: row.price });
+  });
+  (reportHoldings || report?.holdings || []).forEach((row) => {
+    if (!row.symbol) return;
+    rows.set(row.symbol, { ...(rows.get(row.symbol) || {}), ...row });
+  });
+  return rows;
 }
 
 function renderLedger() {
@@ -443,6 +457,55 @@ function renderLedgerSummary(completed) {
     summaryCard("Yearly Profit", summaryPairs(yearly)),
     summaryCard("XIRR / CAGR", `${optionalPct(state.report?.xirr)} / ${optionalPct(liveCagr())}`),
   ].join("");
+}
+
+function renderBrokerCards(targetId, response) {
+  const target = $(targetId);
+  if (!target) return;
+  const cards = [
+    ["Cash Available", findNumberDeep(response, [/cash.*avail/i, /available.*cash/i, /bank.*balance/i, /clear.*balance/i])],
+    ["Margin Available", findNumberDeep(response, [/margin.*avail/i, /available.*margin/i, /limit.*avail/i, /available.*limit/i])],
+    ["Total Limit", findNumberDeep(response, [/total.*limit/i, /total.*margin/i, /gross.*limit/i])],
+    ["Used Margin", findNumberDeep(response, [/used.*margin/i, /margin.*used/i, /utili[sz]ed/i, /amount.*block/i])],
+  ];
+  target.innerHTML = cards.map(([label, value]) => summaryCard(label, money(value))).join("");
+}
+
+function findNumberDeep(value, patterns) {
+  const seen = new Set();
+  function walk(node) {
+    if (node === null || node === undefined || seen.has(node)) return null;
+    if (typeof node === "object") seen.add(node);
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found = walk(item);
+        if (found !== null) return found;
+      }
+      return null;
+    }
+    if (typeof node !== "object") return null;
+    for (const [key, raw] of Object.entries(node)) {
+      if (patterns.some((pattern) => pattern.test(key))) {
+        const parsed = parseBrokerNumber(raw);
+        if (parsed !== null) return parsed;
+      }
+    }
+    for (const raw of Object.values(node)) {
+      const found = walk(raw);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  return walk(value);
+}
+
+function parseBrokerNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const cleaned = value.replace(/,/g, "").replace(/[^\d.-]/g, "").trim();
+  if (!cleaned) return null;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function liveCagr() {
@@ -530,6 +593,29 @@ function sourceSummary(row) {
   const sourceDate = row.source_date ? ` ${row.source_date}` : "";
   const sourceValues = row.source_price && row.source_ema ? ` ${money(row.source_price)}/${money(row.source_ema)}` : "";
   return `${source}${sourceDate}${sourceValues}`;
+}
+
+function portfolioBuyDate(row) {
+  if (row?.date) return String(row.date).slice(0, 10);
+  const match = matchingBuyTrade(row);
+  return match?.date ? String(match.date).slice(0, 10) : "";
+}
+
+function matchingBuyTrade(row) {
+  const symbol = row?.symbol || "";
+  const stockCode = row?.stock_code || "";
+  const qty = Number(row?.quantity || 0);
+  const price = Number(row?.price || 0);
+  const buys = (state.iciciTradeRows || [])
+    .filter((trade) => String(trade.side || "").toUpperCase() === "BUY")
+    .filter((trade) => trade.symbol === symbol || trade.stock_code === stockCode)
+    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+  if (!buys.length) return null;
+  const exact = buys.find((trade) =>
+    Math.abs(Number(trade.quantity || 0) - qty) < 0.001 &&
+    Math.abs(Number(trade.price || 0) - price) < Math.max(0.05, price * 0.002)
+  );
+  return exact || buys[0];
 }
 
 function descriptionFor(symbol, broker = "") {
@@ -665,6 +751,7 @@ async function loadIciciPortfolio() {
     ...positionRows.map((row) => ({ ...row, source: "Positions" })),
   ].filter((row) => row.symbol && Number(row.quantity || 0) > 0);
   renderIciciPortfolioRows(state.iciciPortfolioRows);
+  renderBrokerCards("iciciBrokerCards", payload.funds?.response || payload.funds || {});
   $("iciciBrokerSummary").textContent = JSON.stringify({ funds: payload.funds?.response, demat: payload.demat_holdings?.response }, null, 2);
   $("iciciResult").textContent = JSON.stringify(payload.funds?.response || payload, null, 2);
   $("iciciPortfolioStatus").textContent = `${state.iciciPortfolioRows.length} rows`;
@@ -675,6 +762,7 @@ async function loadIciciTrades() {
   const payload = await api(`/api/icici/trades${dateQuery("iciciFromDate", "iciciToDate")}`);
   state.iciciTradeRows = (payload.trades?.rows || []).filter((row) => row.symbol && Number(row.quantity || 0) > 0);
   renderIciciTradeRows(state.iciciTradeRows);
+  renderIciciPortfolioRows(state.iciciPortfolioRows);
   $("iciciResult").textContent = JSON.stringify(payload.trades?.response || payload, null, 2);
   $("iciciTradesStatus").textContent = `${state.iciciTradeRows.length} rows`;
 }
@@ -691,6 +779,7 @@ async function loadDhanSummary() {
   state.dhanOrderRows = payload.orders?.rows || [];
   renderDhanPortfolioRows(state.dhanPortfolioRows);
   renderDhanOrderRows(state.dhanOrderRows);
+  renderBrokerCards("dhanBrokerCards", payload.funds?.response || payload.funds || {});
   $("dhanResult").textContent = JSON.stringify({ profile: payload.profile?.response, funds: payload.funds?.response, orders: payload.orders?.response }, null, 2);
   renderDhan(payload.credentials || {});
 }
@@ -714,9 +803,10 @@ function dateQuery(fromId, toId) {
 async function importIciciHolding(index) {
   const row = state.iciciPortfolioRows[index];
   if (!row) return;
+  const buyDate = portfolioBuyDate(row);
   const payload = await api("/api/icici/import/holding", {
     method: "POST",
-    body: JSON.stringify({ row: { ...row, broker: "icici" } }),
+    body: JSON.stringify({ row: { ...row, date: buyDate || row.date, broker: "icici" } }),
   });
   state.liveState = payload.state;
   renderReport(state.report);
