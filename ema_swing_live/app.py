@@ -17,7 +17,7 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 from backtesting.etf_backtester.config.etf_universe import ETF_UNIVERSE
 from backtesting.etf_backtester.data.icici_breeze import load_icici_symbol_aliases
 from backtesting.etf_backtester.live.signal_runner import LIVE_CONFIG_PATH, _apply_actions, clear_live_ledger, run_live_signals
-from backtesting.etf_backtester.live.state import LIVE_REPORT_PATH, LIVE_STATE_PATH, load_live_state, save_live_state
+from backtesting.etf_backtester.live.state import LIVE_REPORT_PATH, LIVE_STATE_PATH, load_live_state, reconcile_empty_holdings_cash, save_live_state
 from ema_swing_live import dhan, icici
 from ema_swing_live.storage import INSTANCE_DIR, load_json, load_settings, save_json, save_settings
 
@@ -153,7 +153,14 @@ def create_app() -> Flask:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             return jsonify({"error": f"Live signal run failed: {exc}"}), 500
-        return jsonify({"report": run.report, "report_path": str(run.report_path), "state_path": str(run.state_path)})
+        return jsonify(
+            {
+                "report": run.report,
+                "live_state": _load_live_state(),
+                "report_path": str(run.report_path),
+                "state_path": str(run.state_path),
+            }
+        )
 
     @app.post("/api/live/clear")
     @_login_required
@@ -665,7 +672,10 @@ def _load_latest_report() -> dict[str, Any] | None:
 
 def _load_live_state() -> dict[str, Any]:
     config = _load_live_config()
-    return load_live_state(LIVE_STATE_PATH, initial_capital=float(config.get("initial_capital", 0)))
+    state = load_live_state(LIVE_STATE_PATH, initial_capital=float(config.get("initial_capital", 0)))
+    if reconcile_empty_holdings_cash(state, float(config.get("initial_capital", 0))):
+        save_live_state(state, LIVE_STATE_PATH)
+    return state
 
 
 def _apply_capital_delta(capital_delta: float, old_initial_capital: float, config: dict[str, Any]) -> dict[str, Any]:
@@ -887,13 +897,18 @@ def _date_text(value: Any) -> str:
 
 def _normalize_live_state(payload: dict[str, Any]) -> dict[str, Any]:
     current = _load_live_state()
+    config = _load_live_config()
     state = dict(current)
-    state["cash"] = float(payload.get("cash", current.get("cash", 0)) or 0)
     state["holdings"] = _normalize_holdings(payload.get("holdings", current.get("holdings", {})))
     state["trades"] = _normalize_trades(payload.get("trades", current.get("trades", [])))
+    if "cash" in payload:
+        state["cash"] = float(payload.get("cash", current.get("cash", 0)) or 0)
+    else:
+        state["cash"] = float(current.get("cash", config.get("initial_capital", 0)) or 0)
     state["completed_trades"] = []
     state.setdefault("capital_adjustments", current.get("capital_adjustments", []))
     state.setdefault("created_at", current.get("created_at", datetime.now().isoformat(timespec="seconds")))
+    reconcile_empty_holdings_cash(state, float(config.get("initial_capital", 0)))
     return state
 
 

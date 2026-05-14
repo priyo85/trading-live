@@ -619,10 +619,11 @@ function serializeLedger() {
 
 async function saveLiveState({ holdings, trades } = {}) {
   const payload = {
-    cash: currentLedgerCash(),
     holdings: holdings ?? serializeHoldings(),
     trades: trades ?? serializeLedger(),
   };
+  const cashInput = $("ledgerCash");
+  if (cashInput && cashInput.value !== "") payload.cash = Number(cashInput.value);
   const response = await api("/api/live/state", {
     method: "PUT",
     body: JSON.stringify(payload),
@@ -635,9 +636,14 @@ async function saveLiveState({ holdings, trades } = {}) {
 }
 
 async function resetLedgerCashToInitialCapital() {
-  $("ledgerCash").value = Number($("initialCapital").value || 0).toFixed(2);
-  await saveLiveState();
-  setMessage("Configuration saved. Ledger cash reset from initial capital. Run signals to recalculate actions.");
+  const response = await api("/api/live/state", {
+    method: "PUT",
+    body: JSON.stringify({ holdings: serializeHoldings(), trades: serializeLedger() }),
+  });
+  state.liveState = response.state;
+  renderReport(state.report);
+  renderLedger();
+  setMessage("Strategy cash reconciled from initial capital and completed trades.");
 }
 
 async function refreshBrokerOrderBook() {
@@ -802,6 +808,7 @@ on("runSignals", "click", async () => {
       }),
     });
     state.report = payload.report;
+    if (payload.live_state) state.liveState = payload.live_state;
     renderReport(payload.report);
     setMessage("Live signal run completed.");
   } catch (error) {
@@ -834,6 +841,7 @@ on("clearLedger", "click", async () => {
   try {
     const payload = await api("/api/live/clear", { method: "POST", body: JSON.stringify({}) });
     state.liveState = payload.state;
+    state.report = null;
     renderReport(null);
     renderLedger();
     setMessage("Ledger cleared.");

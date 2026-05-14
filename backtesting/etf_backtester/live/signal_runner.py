@@ -22,6 +22,7 @@ from backtesting.etf_backtester.live.state import (
     build_completed_trades,
     empty_live_state,
     load_live_state,
+    reconcile_empty_holdings_cash,
     save_live_report,
     save_live_state,
 )
@@ -88,6 +89,8 @@ def run_live_signals(
     symbols = config["symbols"] or ETF_UNIVERSE
     price_time = None if use_daily_close else _live_price_time(config, run_time)
     state = load_live_state(state_path, initial_capital=float(config["initial_capital"]))
+    if reconcile_empty_holdings_cash(state, float(config["initial_capital"])):
+        save_live_state(state, state_path)
 
     history_price_time = price_time if strict_price_time and price_time is not None else None
     if strict_price_time and price_time is not None and not _can_request_intraday(run_day):
