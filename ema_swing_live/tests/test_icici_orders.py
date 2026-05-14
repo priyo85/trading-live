@@ -100,3 +100,19 @@ def test_limit_payload_supports_mtf_product():
     )
 
     assert payload["product"] == "mtf"
+
+
+def test_icici_portfolio_position_maps_alias_and_derives_mtf_loan():
+    row = icici._normalized_broker_position(
+        {
+            "stock_code": "HANBEE",
+            "quantity": "185",
+            "average_price": "539.88",
+            "margin_amount": "24320.24",
+        }
+    )
+
+    assert row["symbol"] == "NSE:HNGSNGBEES"
+    assert row["funding_mode"] == "mtf"
+    assert round(row["value"], 2) == 99877.80
+    assert round(row["mtf_loan"], 2) == 75557.56

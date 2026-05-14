@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from backtesting.etf_backtester.data.icici_breeze import BreezeInstrument, IciciBreezeProvider
+from backtesting.etf_backtester.data.icici_breeze import BreezeInstrument, IciciBreezeProvider, load_icici_symbol_aliases
 from ema_swing_live.storage import INSTANCE_DIR, load_json, mask_value, save_json
 
 
@@ -516,6 +516,7 @@ def _normalized_broker_position(row: dict[str, Any]) -> dict[str, Any]:
     if value <= 0 and quantity > 0 and price > 0:
         value = quantity * price
     margin_amount = _first_number(row, "margin_amount", "marginAmount", "amount_blocked", "total_amount_blocked")
+    funding_mode = "mtf" if _looks_mtf(row, value=value, margin_amount=margin_amount) else "delivery"
     mtf_loan = _broker_mtf_loan(row, value=value, margin_amount=margin_amount)
     return {
         "symbol": _strategy_symbol(stock_code),
@@ -524,7 +525,7 @@ def _normalized_broker_position(row: dict[str, Any]) -> dict[str, Any]:
         "price": price,
         "value": value,
         "product": product,
-        "funding_mode": "mtf" if _looks_mtf(row) else "delivery",
+        "funding_mode": funding_mode,
         "mtf_loan": mtf_loan,
         "margin_amount": margin_amount,
         "raw": row,
@@ -540,6 +541,7 @@ def _normalized_broker_trade(row: dict[str, Any]) -> dict[str, Any]:
     if value <= 0 and quantity > 0 and price > 0:
         value = quantity * price
     margin_amount = _first_number(row, "margin_amount", "marginAmount", "amount_blocked", "total_amount_blocked")
+    funding_mode = "mtf" if _looks_mtf(row, value=value, margin_amount=margin_amount) else "delivery"
     return {
         "date": _first_text(row, "trade_date", "tradeDate", "order_date", "orderDate", "exchange_time", "datetime"),
         "symbol": _strategy_symbol(stock_code),
@@ -549,7 +551,7 @@ def _normalized_broker_trade(row: dict[str, Any]) -> dict[str, Any]:
         "price": price,
         "value": value,
         "product": product,
-        "funding_mode": "mtf" if _looks_mtf(row) else "delivery",
+        "funding_mode": funding_mode,
         "mtf_loan": _broker_mtf_loan(row, value=value, margin_amount=margin_amount),
         "margin_amount": margin_amount,
         "order_id": _first_text(row, "order_id", "orderId", "order_reference", "orderReference"),
@@ -577,16 +579,18 @@ def _first_number(row: dict[str, Any], *keys: str) -> float:
     return 0.0
 
 
-def _looks_mtf(row: dict[str, Any]) -> bool:
+def _looks_mtf(row: dict[str, Any], *, value: float = 0.0, margin_amount: float = 0.0) -> bool:
     text = " ".join(str(value).lower() for value in row.values() if isinstance(value, (str, int, float)))
-    return "mtf" in text or "margin trading" in text
+    if "mtf" in text or "margin trading" in text:
+        return True
+    return value > 0 and margin_amount > 0 and margin_amount < value
 
 
 def _broker_mtf_loan(row: dict[str, Any], *, value: float, margin_amount: float) -> float:
     direct = _first_number(row, "mtf_loan", "loan_amount", "funded_amount", "funded_value", "broker_funded_amount")
     if direct > 0:
         return direct
-    if _looks_mtf(row) and value > 0 and margin_amount > 0:
+    if _looks_mtf(row, value=value, margin_amount=margin_amount) and value > 0 and margin_amount > 0:
         return max(value - margin_amount, 0.0)
     return 0.0
 
@@ -613,7 +617,20 @@ def _strategy_symbol(stock_code: str) -> str:
         return code
     if code.endswith(".NS"):
         code = code[:-3]
+    reverse_alias = _icici_reverse_aliases().get(code)
+    if reverse_alias:
+        return reverse_alias
     return f"NSE:{code}"
+
+
+def _icici_reverse_aliases() -> dict[str, str]:
+    aliases = load_icici_symbol_aliases()
+    reverse: dict[str, str] = {}
+    for symbol, value in aliases.items():
+        stock_code = str(value.get("stock_code") if isinstance(value, dict) else value).strip().upper()
+        if stock_code:
+            reverse[stock_code] = str(symbol).strip().upper()
+    return reverse
 
 
 def _safe_response(response: Any, *, truncate_success: bool = True) -> Any:

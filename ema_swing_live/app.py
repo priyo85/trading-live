@@ -17,7 +17,7 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 from backtesting.etf_backtester.config.etf_universe import ETF_UNIVERSE
 from backtesting.etf_backtester.data.icici_breeze import load_icici_symbol_aliases
 from backtesting.etf_backtester.live.signal_runner import LIVE_CONFIG_PATH, _apply_actions, clear_live_ledger, run_live_signals
-from backtesting.etf_backtester.live.state import LIVE_REPORT_PATH, LIVE_STATE_PATH, load_live_state, reconcile_empty_holdings_cash, save_live_state
+from backtesting.etf_backtester.live.state import LIVE_REPORT_PATH, LIVE_STATE_PATH, load_live_state, reconcile_strategy_cash, save_live_state
 from ema_swing_live import dhan, icici
 from ema_swing_live.storage import INSTANCE_DIR, load_json, load_settings, save_json, save_settings
 
@@ -623,6 +623,28 @@ def _broker_codes() -> dict[str, dict[str, str]]:
     return codes
 
 
+def _icici_reverse_aliases() -> dict[str, str]:
+    aliases = load_icici_symbol_aliases()
+    reverse: dict[str, str] = {}
+    for symbol, value in aliases.items():
+        stock_code = str(value.get("stock_code") if isinstance(value, dict) else value).strip().upper()
+        if stock_code:
+            reverse[stock_code] = str(symbol).strip().upper()
+    return reverse
+
+
+def _strategy_symbol_from_broker(value: Any) -> str:
+    symbol = str(value or "").strip().upper()
+    if not symbol:
+        return ""
+    if symbol.endswith(".NS"):
+        symbol = symbol[:-3]
+    if symbol.startswith("NSE:"):
+        code = symbol.split(":", maxsplit=1)[1]
+        return _icici_reverse_aliases().get(code, symbol)
+    return _icici_reverse_aliases().get(symbol, f"NSE:{symbol}")
+
+
 def _load_log_settings() -> dict[str, Any]:
     data = load_json(LOG_SETTINGS_PATH, {"enabled": True, "level": "INFO"})
     level = str(data.get("level", "INFO")).upper()
@@ -673,9 +695,56 @@ def _load_latest_report() -> dict[str, Any] | None:
 def _load_live_state() -> dict[str, Any]:
     config = _load_live_config()
     state = load_live_state(LIVE_STATE_PATH, initial_capital=float(config.get("initial_capital", 0)))
-    if reconcile_empty_holdings_cash(state, float(config.get("initial_capital", 0))):
+    changed = _repair_strategy_holdings(state)
+    if reconcile_strategy_cash(state, float(config.get("initial_capital", 0))):
+        changed = True
+    if changed:
         save_live_state(state, LIVE_STATE_PATH)
     return state
+
+
+def _repair_strategy_holdings(state: dict[str, Any]) -> bool:
+    holdings = state.get("holdings")
+    if not isinstance(holdings, dict):
+        return False
+
+    changed = False
+    repaired: dict[str, Any] = {}
+    for key, holding in list(holdings.items()):
+        if not isinstance(holding, dict):
+            continue
+        symbol = _strategy_symbol_from_broker(holding.get("symbol") or key)
+        row = dict(holding)
+        if symbol and symbol != row.get("symbol"):
+            row["symbol"] = symbol
+            changed = True
+
+        cost_basis = float(row.get("cost_basis", 0) or 0)
+        if cost_basis <= 0:
+            cost_basis = float(row.get("shares", 0) or 0) * float(row.get("entry_price", 0) or 0)
+            row["cost_basis"] = cost_basis
+        margin_used = float(row.get("margin_used", 0) or 0)
+        mtf_loan = float(row.get("mtf_loan", 0) or 0)
+        if margin_used > 0 and mtf_loan <= 0 and cost_basis > margin_used:
+            row["funding_mode"] = "mtf"
+            row["mtf_loan"] = max(cost_basis - margin_used, 0.0)
+            changed = True
+
+        details = _latest_signal_details(symbol)
+        if not row.get("entry_ema") and details.get("entry_ema"):
+            row["entry_ema"] = details["entry_ema"]
+            changed = True
+        if not row.get("entry_low") and details.get("entry_low"):
+            row["entry_low"] = details["entry_low"]
+            changed = True
+
+        repaired[symbol or str(key)] = row
+        if symbol and symbol != key:
+            changed = True
+
+    if changed:
+        state["holdings"] = repaired
+    return changed
 
 
 def _apply_capital_delta(capital_delta: float, old_initial_capital: float, config: dict[str, Any]) -> dict[str, Any]:
@@ -760,12 +829,26 @@ def _report_action(action_id: str) -> dict[str, Any]:
     raise ValueError("Action was not found in the latest signal report.")
 
 
+def _latest_signal_details(symbol: str) -> dict[str, float]:
+    report = _load_latest_report() or {}
+    for row in report.get("signal_rows", []):
+        if str(row.get("symbol", "")).strip().upper() == str(symbol or "").strip().upper():
+            return {
+                "entry_ema": float(row.get("source_ema", 0) or 0),
+                "entry_low": float(row.get("source_low") or row.get("source_price") or row.get("price") or 0),
+                "cmp": float(row.get("price", 0) or 0),
+            }
+    return {"entry_ema": 0.0, "entry_low": 0.0, "cmp": 0.0}
+
+
 def _book_report_action(action_id: str, quantity: Any, price: Any, product: str, broker_order_id: str = "") -> dict[str, Any]:
     action = _report_action(action_id)
     config = _load_live_config()
     state = _load_live_state()
     booked = _action_with_order_values(action, state, quantity=quantity, price=price, product=product, broker_order_id=broker_order_id)
     _apply_actions(state, [booked], config)
+    _repair_strategy_holdings(state)
+    reconcile_strategy_cash(state, float(config.get("initial_capital", 0)))
     save_live_state(state, LIVE_STATE_PATH)
     return state
 
@@ -773,15 +856,15 @@ def _book_report_action(action_id: str, quantity: Any, price: Any, product: str,
 def _import_broker_holding(row: Any, broker: str = "icici") -> dict[str, Any]:
     if not isinstance(row, dict):
         raise ValueError("Broker holding row is required.")
-    symbol = str(row.get("symbol", "")).strip().upper()
+    symbol = _strategy_symbol_from_broker(row.get("symbol") or row.get("stock_code"))
     if not symbol:
         raise ValueError("Broker row has no symbol.")
     shares = int(_positive_number(row.get("quantity"), f"{symbol} quantity"))
     price = _positive_number(row.get("price"), f"{symbol} price")
     value = float(row.get("value", shares * price) or shares * price)
-    funding_mode = "mtf" if str(row.get("funding_mode", "")).lower() == "mtf" else "delivery"
-    mtf_loan = float(row.get("mtf_loan", 0) or 0)
     margin_amount = float(row.get("margin_amount", 0) or 0)
+    funding_mode = "mtf" if str(row.get("funding_mode", "")).lower() == "mtf" or (margin_amount > 0 and value > margin_amount) else "delivery"
+    mtf_loan = float(row.get("mtf_loan", 0) or 0)
     if funding_mode == "mtf" and mtf_loan <= 0 and margin_amount > 0:
         mtf_loan = max(value - margin_amount, 0.0)
 
@@ -793,6 +876,7 @@ def _import_broker_holding(row: Any, broker: str = "icici") -> dict[str, Any]:
     if previous:
         previous_cash_required = float(previous.get("cost_basis", 0) or 0) - float(previous.get("mtf_loan", 0) or 0)
     cash_required = value - mtf_loan if funding_mode == "mtf" else value
+    signal_details = _latest_signal_details(symbol)
     holdings[symbol] = {
         "symbol": symbol,
         "shares": shares,
@@ -803,8 +887,11 @@ def _import_broker_holding(row: Any, broker: str = "icici") -> dict[str, Any]:
         "mtf_loan": mtf_loan,
         "margin_used": margin_amount,
         "broker": broker,
+        "entry_ema": signal_details.get("entry_ema", 0.0),
+        "entry_low": signal_details.get("entry_low", 0.0),
     }
     state["cash"] = float(state.get("cash", config["initial_capital"]) or 0) + previous_cash_required - cash_required
+    reconcile_strategy_cash(state, float(config.get("initial_capital", 0)))
     save_live_state(state, LIVE_STATE_PATH)
     return state
 
@@ -821,12 +908,14 @@ def _import_broker_trade(row: Any) -> dict[str, Any]:
         action["cash_delta"] = float(action["value"]) - float(action["mtf_loan_repayment"])
         action["profit"] = float(action["value"]) - float(holding.get("cost_basis", action["value"]) or action["value"])
     _apply_actions(state, [action], config)
+    _repair_strategy_holdings(state)
+    reconcile_strategy_cash(state, float(config.get("initial_capital", 0)))
     save_live_state(state, LIVE_STATE_PATH)
     return state
 
 
 def _broker_row_action(row: dict[str, Any]) -> dict[str, Any]:
-    symbol = str(row.get("symbol", "")).strip().upper()
+    symbol = _strategy_symbol_from_broker(row.get("symbol") or row.get("stock_code"))
     side = str(row.get("side", "")).strip().upper()
     if not symbol:
         raise ValueError("Broker trade row has no symbol.")
@@ -835,9 +924,9 @@ def _broker_row_action(row: dict[str, Any]) -> dict[str, Any]:
     shares = int(_positive_number(row.get("quantity"), f"{symbol} quantity"))
     price = _positive_number(row.get("price"), f"{symbol} price")
     value = float(row.get("value", shares * price) or shares * price)
-    funding_mode = "mtf" if str(row.get("funding_mode", "")).lower() == "mtf" else "delivery"
     mtf_loan = float(row.get("mtf_loan", 0) or 0)
     margin_amount = float(row.get("margin_amount", 0) or 0)
+    funding_mode = "mtf" if str(row.get("funding_mode", "")).lower() == "mtf" or (margin_amount > 0 and value > margin_amount) else "delivery"
     if funding_mode == "mtf" and mtf_loan <= 0 and margin_amount > 0:
         mtf_loan = max(value - margin_amount, 0.0)
     if funding_mode == "mtf" and mtf_loan <= 0 and side == "BUY":
@@ -908,7 +997,8 @@ def _normalize_live_state(payload: dict[str, Any]) -> dict[str, Any]:
     state["completed_trades"] = []
     state.setdefault("capital_adjustments", current.get("capital_adjustments", []))
     state.setdefault("created_at", current.get("created_at", datetime.now().isoformat(timespec="seconds")))
-    reconcile_empty_holdings_cash(state, float(config.get("initial_capital", 0)))
+    _repair_strategy_holdings(state)
+    reconcile_strategy_cash(state, float(config.get("initial_capital", 0)))
     return state
 
 
@@ -920,26 +1010,33 @@ def _normalize_holdings(value: Any) -> dict[str, Any]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        symbol = str(row.get("symbol", "")).strip().upper()
+        symbol = _strategy_symbol_from_broker(row.get("symbol"))
         if not symbol:
             continue
         shares = int(_positive_number(row.get("shares"), f"{symbol} shares"))
         entry_price = _positive_number(row.get("entry_price"), f"{symbol} entry price")
+        cost_basis = float(row.get("cost_basis", shares * entry_price) or shares * entry_price)
+        margin_used = float(row.get("margin_used", 0) or 0)
+        mtf_loan = float(row.get("mtf_loan", 0) or 0)
         funding_mode = str(row.get("funding_mode", "delivery")).strip().lower()
         if funding_mode not in {"delivery", "mtf"}:
             funding_mode = "delivery"
+        if margin_used > 0 and mtf_loan <= 0 and cost_basis > margin_used:
+            funding_mode = "mtf"
+            mtf_loan = max(cost_basis - margin_used, 0.0)
+        details = _latest_signal_details(symbol)
         holdings[symbol] = {
             "symbol": symbol,
             "shares": shares,
             "entry_price": entry_price,
             "entry_date": str(row.get("entry_date", "")).strip() or datetime.now().date().isoformat(),
-            "cost_basis": float(row.get("cost_basis", shares * entry_price) or shares * entry_price),
+            "cost_basis": cost_basis,
             "funding_mode": funding_mode,
-            "mtf_loan": float(row.get("mtf_loan", 0) or 0),
-            "margin_used": float(row.get("margin_used", 0) or 0),
+            "mtf_loan": mtf_loan,
+            "margin_used": margin_used,
             "broker": str(row.get("broker", "")).strip(),
-            "entry_ema": float(row.get("entry_ema", 0) or 0),
-            "entry_low": float(row.get("entry_low", 0) or 0),
+            "entry_ema": float(row.get("entry_ema", 0) or details.get("entry_ema", 0) or 0),
+            "entry_low": float(row.get("entry_low", 0) or details.get("entry_low", 0) or 0),
         }
     return holdings
 

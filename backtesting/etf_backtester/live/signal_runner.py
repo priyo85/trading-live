@@ -22,7 +22,7 @@ from backtesting.etf_backtester.live.state import (
     build_completed_trades,
     empty_live_state,
     load_live_state,
-    reconcile_empty_holdings_cash,
+    reconcile_strategy_cash,
     save_live_report,
     save_live_state,
 )
@@ -89,7 +89,7 @@ def run_live_signals(
     symbols = config["symbols"] or ETF_UNIVERSE
     price_time = None if use_daily_close else _live_price_time(config, run_time)
     state = load_live_state(state_path, initial_capital=float(config["initial_capital"]))
-    if reconcile_empty_holdings_cash(state, float(config["initial_capital"])):
+    if reconcile_strategy_cash(state, float(config["initial_capital"])):
         save_live_state(state, state_path)
 
     history_price_time = price_time if strict_price_time and price_time is not None else None
@@ -536,6 +536,7 @@ def _empty_signal_context() -> dict[str, Any]:
         "last_event_date": "",
         "source_price": None,
         "source_ema": None,
+        "source_low": None,
     }
 
 
@@ -593,6 +594,7 @@ def _signal_context_on_date(
         "last_event_date": last_event_date.isoformat() if last_event_date else "",
         "source_price": float(row["close"]),
         "source_ema": ema_values[target_index],
+        "source_low": float(row.get("low", row["close"])),
     }
 
 
@@ -970,6 +972,7 @@ def _build_signal_rows(
                 "last_signal_date": signal_context["last_event_date"],
                 "source_price": signal_context["source_price"],
                 "source_ema": signal_context["source_ema"],
+                "source_low": signal_context.get("source_low"),
                 "price": float(row["close"]) if row else None,
                 "ath_source": metrics["ath_source"],
                 "ath_current_price": metrics["ath_current_price"],

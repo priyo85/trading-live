@@ -104,19 +104,11 @@ def load_live_state(path: Path = LIVE_STATE_PATH, initial_capital: float = 0.0) 
     return data
 
 
-def reconcile_empty_holdings_cash(state: dict[str, Any], initial_capital: float) -> bool:
-    """Repair stale cash when there are no strategy holdings.
-
-    Manual holding edits can remove all open positions while old unmatched BUY
-    ledger rows remain. In that case the strategy is flat, so cash should be
-    the manual capital plus realized profit from completed round trips.
-    """
+def reconcile_strategy_cash(state: dict[str, Any], initial_capital: float) -> bool:
+    """Repair stale strategy cash from manual capital, holdings, and closed trades."""
 
     holdings = state.get("holdings", {})
-    has_holdings = bool(holdings) if isinstance(holdings, dict) else bool(holdings or [])
-    if has_holdings:
-        return False
-
+    holding_rows = list(holdings.values()) if isinstance(holdings, dict) else list(holdings or [])
     completed = []
     if isinstance(state.get("completed_trades"), list):
         completed.extend(row for row in state["completed_trades"] if isinstance(row, dict))
@@ -124,15 +116,31 @@ def reconcile_empty_holdings_cash(state: dict[str, Any], initial_capital: float)
         completed.extend(build_completed_trades(state["trades"]))
 
     realized_profit = sum(float(row.get("profit", 0) or 0) for row in completed)
-    expected_cash = float(initial_capital) + realized_profit
+    cash_used = 0.0
+    for holding in holding_rows:
+        if not isinstance(holding, dict):
+            continue
+        cost_basis = float(holding.get("cost_basis", 0) or 0)
+        if cost_basis <= 0:
+            cost_basis = float(holding.get("shares", 0) or 0) * float(holding.get("entry_price", 0) or 0)
+        mtf_loan = float(holding.get("mtf_loan", 0) or 0)
+        cash_used += max(cost_basis - mtf_loan, 0.0)
+
+    expected_cash = float(initial_capital) + realized_profit - cash_used
     current_cash = float(state.get("cash", initial_capital) or 0)
     if abs(current_cash - expected_cash) < 0.005:
         return False
 
     state["cash"] = expected_cash
     state["cash_reconciled_at"] = datetime.now().isoformat(timespec="seconds")
-    state["cash_reconcile_reason"] = "empty_holdings"
+    state["cash_reconcile_reason"] = "strategy_cash"
     return True
+
+
+def reconcile_empty_holdings_cash(state: dict[str, Any], initial_capital: float) -> bool:
+    """Backward-compatible wrapper for strategy cash reconciliation."""
+
+    return reconcile_strategy_cash(state, initial_capital)
 
 
 def save_live_state(state: dict[str, Any], path: Path = LIVE_STATE_PATH) -> Path:

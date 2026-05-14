@@ -1,6 +1,6 @@
 import unittest
 
-from backtesting.etf_backtester.live.state import reconcile_empty_holdings_cash
+from backtesting.etf_backtester.live.state import reconcile_empty_holdings_cash, reconcile_strategy_cash
 
 
 class LiveStateTests(unittest.TestCase):
@@ -41,3 +41,22 @@ class LiveStateTests(unittest.TestCase):
 
         self.assertTrue(changed)
         self.assertEqual(state["cash"], 500100)
+
+    def test_reconcile_strategy_cash_uses_mtf_margin_not_full_value(self):
+        state = {
+            "cash": 0,
+            "holdings": {
+                "NSE:HNGSNGBEES": {
+                    "shares": 185,
+                    "entry_price": 539.88,
+                    "cost_basis": 99877.80,
+                    "mtf_loan": 75557.56,
+                }
+            },
+            "trades": [],
+        }
+
+        changed = reconcile_strategy_cash(state, 500000)
+
+        self.assertTrue(changed)
+        self.assertAlmostEqual(state["cash"], 475679.76, places=2)
