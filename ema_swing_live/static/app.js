@@ -462,13 +462,61 @@ function renderLedgerSummary(completed) {
 function renderBrokerCards(targetId, response) {
   const target = $(targetId);
   if (!target) return;
+  const available = brokerMetric(response, [
+    /cash.*avail/i,
+    /avail.*cash/i,
+    /available.*balance/i,
+    /availabel.*balance/i,
+    /withdraw.*balance/i,
+    /clear.*balance/i,
+    /bank.*balance/i,
+    /^balance$/i,
+  ]);
+  const totalLimit = brokerMetric(response, [
+    /total.*limit/i,
+    /sod.*limit/i,
+    /gross.*limit/i,
+    /cash.*limit/i,
+    /allocated.*equity/i,
+    /allocated.*amount/i,
+    /collateral.*amount/i,
+    /total.*margin/i,
+  ]);
+  const used = brokerMetric(response, [
+    /used.*margin/i,
+    /margin.*used/i,
+    /utili[sz]ed/i,
+    /utilized.*amount/i,
+    /block.*trade/i,
+    /amount.*block/i,
+    /blocked/i,
+  ]);
+  const explicitMarginAvailable = brokerMetric(response, [
+    /margin.*avail/i,
+    /available.*margin/i,
+    /limit.*avail/i,
+    /available.*limit/i,
+    /net.*available/i,
+  ]);
+  const derivedMarginAvailable = totalLimit !== null && used !== null ? Math.max(totalLimit - used, 0) : null;
   const cards = [
-    ["Cash Available", findNumberDeep(response, [/cash.*avail/i, /available.*cash/i, /bank.*balance/i, /clear.*balance/i])],
-    ["Margin Available", findNumberDeep(response, [/margin.*avail/i, /available.*margin/i, /limit.*avail/i, /available.*limit/i])],
-    ["Total Limit", findNumberDeep(response, [/total.*limit/i, /total.*margin/i, /gross.*limit/i])],
-    ["Used Margin", findNumberDeep(response, [/used.*margin/i, /margin.*used/i, /utili[sz]ed/i, /amount.*block/i])],
+    ["Cash Available", available],
+    ["Margin Available", explicitMarginAvailable ?? derivedMarginAvailable],
+    ["Total Limit", totalLimit],
+    ["Used Margin", used],
   ];
-  target.innerHTML = cards.map(([label, value]) => summaryCard(label, money(value))).join("");
+  target.innerHTML = `
+    ${cards.map(([label, value]) => summaryCard(label, money(value))).join("")}
+    ${brokerMoneyTable(response)}
+  `;
+}
+
+function brokerMetric(value, patterns) {
+  const exact = findNumberDeep(value, patterns);
+  if (exact !== null) return exact;
+  const fields = collectMoneyFields(value);
+  const row = fields.find((item) => patterns.some((pattern) => pattern.test(item.key) || pattern.test(item.path)));
+  return row ? row.value : null;
 }
 
 function findNumberDeep(value, patterns) {
@@ -497,6 +545,56 @@ function findNumberDeep(value, patterns) {
     return null;
   }
   return walk(value);
+}
+
+function brokerMoneyTable(response) {
+  const rows = collectMoneyFields(response)
+    .filter((row) => !/id$|token|time|date|code|status|count|segment/i.test(row.key))
+    .slice(0, 18);
+  if (!rows.length) return `<article class="broker-fields"><span>Detected money fields</span><strong>-</strong></article>`;
+  return `
+    <article class="broker-fields">
+      <span>Detected money fields</span>
+      <table>
+        <tbody>
+          ${rows.map((row) => `<tr><td>${escapeHtml(prettyBrokerKey(row.key))}</td><td>${money(row.value)}</td></tr>`).join("")}
+        </tbody>
+      </table>
+    </article>
+  `;
+}
+
+function collectMoneyFields(value) {
+  const rows = [];
+  const seen = new Set();
+  function walk(node, path = "") {
+    if (node === null || node === undefined || seen.has(node)) return;
+    if (typeof node === "object") seen.add(node);
+    if (Array.isArray(node)) {
+      node.forEach((item, index) => walk(item, `${path}[${index}]`));
+      return;
+    }
+    if (typeof node !== "object") return;
+    Object.entries(node).forEach(([key, raw]) => {
+      const nextPath = path ? `${path}.${key}` : key;
+      const parsed = parseBrokerNumber(raw);
+      if (parsed !== null && Math.abs(parsed) >= 0.001) rows.push({ key, path: nextPath, value: parsed });
+      walk(raw, nextPath);
+    });
+  }
+  walk(value);
+  const unique = new Map();
+  rows.forEach((row) => {
+    if (!unique.has(row.path)) unique.set(row.path, row);
+  });
+  return [...unique.values()].sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+}
+
+function prettyBrokerKey(key) {
+  return String(key || "")
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function parseBrokerNumber(value) {
