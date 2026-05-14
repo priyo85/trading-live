@@ -88,11 +88,18 @@ def load_live_state(path: Path = LIVE_STATE_PATH, initial_capital: float = 0.0) 
     """Load live state, creating an empty ledger if none exists."""
 
     if not path.exists():
+        stored = _load_sqlite_document(path)
+        if stored:
+            return _ensure_live_state(stored, initial_capital, path)
         return empty_live_state(initial_capital)
 
     with path.open(encoding="utf-8") as file:
         data = json.load(file)
 
+    return _ensure_live_state(data, initial_capital, path)
+
+
+def _ensure_live_state(data: dict[str, Any], initial_capital: float, path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Expected live state object in {path}")
 
@@ -101,6 +108,7 @@ def load_live_state(path: Path = LIVE_STATE_PATH, initial_capital: float = 0.0) 
     data.setdefault("trades", [])
     data.setdefault("completed_trades", [])
     data.setdefault("capital_adjustments", [])
+    _save_sqlite_document(path, data)
     return data
 
 
@@ -150,6 +158,7 @@ def save_live_state(state: dict[str, Any], path: Path = LIVE_STATE_PATH) -> Path
     state["updated_at"] = datetime.now().isoformat(timespec="seconds")
     with path.open("w", encoding="utf-8") as file:
         json.dump(state, file, indent=2)
+    _save_sqlite_document(path, state)
     return path
 
 
@@ -159,4 +168,24 @@ def save_live_report(report: dict[str, Any], path: Path = LIVE_REPORT_PATH) -> P
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as file:
         json.dump(report, file, indent=2)
+    _save_sqlite_document(path, report)
     return path
+
+
+def _load_sqlite_document(path: Path) -> dict[str, Any] | None:
+    try:
+        from ema_swing_live import database
+
+        data = database.load_document(database.document_key_for_path(path), {})
+        return data or None
+    except Exception:
+        return None
+
+
+def _save_sqlite_document(path: Path, data: dict[str, Any]) -> None:
+    try:
+        from ema_swing_live import database
+
+        database.save_document(database.document_key_for_path(path), data)
+    except Exception:
+        return

@@ -18,7 +18,7 @@ from backtesting.etf_backtester.config.etf_universe import ETF_UNIVERSE
 from backtesting.etf_backtester.data.icici_breeze import load_icici_symbol_aliases
 from backtesting.etf_backtester.live.signal_runner import LIVE_CONFIG_PATH, _apply_actions, clear_live_ledger, run_live_signals
 from backtesting.etf_backtester.live.state import LIVE_REPORT_PATH, LIVE_STATE_PATH, load_live_state, reconcile_strategy_cash, save_live_state
-from ema_swing_live import dhan, icici
+from ema_swing_live import database, dhan, icici
 from ema_swing_live.storage import INSTANCE_DIR, load_json, load_settings, save_json, save_settings
 
 
@@ -74,6 +74,7 @@ def create_app() -> Flask:
                 "icici": icici.credentials_status(),
                 "dhan": dhan.credentials_status(),
                 "log_settings": _load_log_settings(),
+                "storage": {"database_path": str(database.DB_PATH), "mode": "sqlite_mirror"},
                 "live_config": _load_live_config(),
                 "live_state": _load_live_state(),
                 "broker_orders": _load_broker_orders(),
@@ -274,6 +275,7 @@ def create_app() -> Flask:
                 "positions": dhan.positions(),
                 "orders": dhan.order_book(),
             }
+            _save_broker_snapshot("dhan", "summary", payload)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -288,6 +290,7 @@ def create_app() -> Flask:
                 from_date=_optional_text(request.args.get("from_date")),
                 to_date=_optional_text(request.args.get("to_date")),
             )
+            _save_broker_snapshot("dhan", "trades", {"trades": trades})
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -437,6 +440,7 @@ def create_app() -> Flask:
                 from_date=_optional_text(request.args.get("from_date")),
                 to_date=_optional_text(request.args.get("to_date")),
             )
+            _save_broker_snapshot("icici", "orders", {"orders": orders})
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -459,6 +463,7 @@ def create_app() -> Flask:
                 ),
                 "positions": icici.portfolio_positions(),
             }
+            _save_broker_snapshot("icici", "portfolio", payload)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -477,6 +482,7 @@ def create_app() -> Flask:
                 action=str(request.args.get("action", "")),
                 stock_code=str(request.args.get("stock_code", "")),
             )
+            _save_broker_snapshot("icici", "trades", {"trades": trades})
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -773,6 +779,13 @@ def _load_broker_orders() -> list[dict[str, Any]]:
 def _save_broker_orders(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
     save_json(BROKER_ORDERS_PATH, {"orders": orders[-200:]})
     return orders[-200:]
+
+
+def _save_broker_snapshot(broker: str, snapshot_type: str, data: dict[str, Any]) -> None:
+    try:
+        database.save_broker_snapshot(broker, snapshot_type, data)
+    except Exception:
+        LOGGER.exception("Could not save %s %s broker snapshot", broker, snapshot_type)
 
 
 def _record_broker_order(action: dict[str, Any], order: dict[str, Any], product: str, quantity: Any, price: Any) -> dict[str, Any]:

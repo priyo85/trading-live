@@ -22,11 +22,15 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
 def load_json(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
     if not path.exists():
+        stored = _load_sqlite_document(path, default)
+        if stored is not None:
+            return stored
         return dict(default or {})
     with path.open(encoding="utf-8-sig") as file:
         data = json.load(file)
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object in {path}")
+    _save_sqlite_document(path, data)
     return data
 
 
@@ -34,6 +38,7 @@ def save_json(path: Path, data: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as file:
         json.dump(data, file, indent=2)
+    _save_sqlite_document(path, data)
     return path
 
 
@@ -57,3 +62,38 @@ def mask_value(value: str) -> str:
     if len(value) <= 6:
         return "***" if value else ""
     return f"{value[:3]}...{value[-3:]}"
+
+
+def _load_sqlite_document(path: Path, default: dict[str, Any] | None) -> dict[str, Any] | None:
+    if _sqlite_disabled(path):
+        return None
+    try:
+        from ema_swing_live import database
+
+        key = database.document_key_for_path(path)
+        data = database.load_document(key, default)
+        return data if data else None
+    except Exception:
+        return None
+
+
+def _save_sqlite_document(path: Path, data: dict[str, Any]) -> None:
+    if _sqlite_disabled(path):
+        return
+    try:
+        from ema_swing_live import database
+
+        database.save_document(database.document_key_for_path(path), data)
+    except Exception:
+        return
+
+
+def _sqlite_disabled(path: Path) -> bool:
+    if os.getenv("EMA_SWING_DISABLE_SQLITE", "").strip().lower() in {"1", "true", "yes"}:
+        return True
+    try:
+        from ema_swing_live import database
+
+        return database.is_secret_path(path)
+    except Exception:
+        return True

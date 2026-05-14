@@ -153,3 +153,37 @@ The dashboard provider selector controls `ETF_DATA_PROVIDER` for live runs:
 - `yahoo`: Yahoo only
 
 Order placement is manual by design: the app never sends broker orders from the signal run automatically.
+
+## Local Storage
+
+Each running instance keeps its own local state. Your laptop and EC2 do not share a live database connection.
+
+By default the app creates a SQLite database at:
+
+```text
+ema_swing_live/instance/ema_swing_live.sqlite
+```
+
+Override it with:
+
+```bash
+EMA_SWING_LIVE_DB_PATH=/opt/ema-swing-live/instance/ema_swing_live.sqlite
+```
+
+The app still writes the existing JSON files for compatibility, but mirrors non-secret app documents into SQLite:
+
+- live strategy state
+- latest live report
+- app settings
+- live config
+- broker order log
+- broker portfolio/trade/order snapshots
+
+Broker credentials are intentionally not mirrored into SQLite. Keep ICICI/Dhan credentials in `.env` or the instance credential JSON files on EC2/local only.
+
+This means:
+
+- local app can run strategy signals, holdings, ledger, config, and reports without EC2
+- EC2 app can run broker fetches and order placement
+- broker snapshots are stored locally on whichever instance fetched them
+- later sync can be added explicitly instead of relying on a shared internet-facing database
