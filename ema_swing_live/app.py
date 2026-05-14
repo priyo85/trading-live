@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 from datetime import datetime
@@ -14,16 +15,21 @@ from uuid import uuid4
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
 from backtesting.etf_backtester.config.etf_universe import ETF_UNIVERSE
+from backtesting.etf_backtester.data.icici_breeze import load_icici_symbol_aliases
 from backtesting.etf_backtester.live.signal_runner import LIVE_CONFIG_PATH, _apply_actions, clear_live_ledger, run_live_signals
 from backtesting.etf_backtester.live.state import LIVE_REPORT_PATH, LIVE_STATE_PATH, load_live_state, save_live_state
-from ema_swing_live import icici
+from ema_swing_live import dhan, icici
 from ema_swing_live.storage import INSTANCE_DIR, load_json, load_settings, save_json, save_settings
 
 
 BROKER_ORDERS_PATH = INSTANCE_DIR / "broker_orders.json"
+LOG_PATH = INSTANCE_DIR / "ema_swing_live.log"
+LOG_SETTINGS_PATH = INSTANCE_DIR / "log_settings.json"
+LOGGER = logging.getLogger(__name__)
 
 
 def create_app() -> Flask:
+    _configure_logging()
     app = Flask(__name__, instance_path=str(INSTANCE_DIR), instance_relative_config=False)
     app.secret_key = os.getenv("EMA_SWING_SECRET_KEY") or os.getenv("FLASK_SECRET_KEY") or "change-this-before-ec2"
 
@@ -54,6 +60,7 @@ def create_app() -> Flask:
         return render_template(
             "index.html",
             etf_universe=list(ETF_UNIVERSE),
+            broker_codes=_broker_codes(),
             today=datetime.now().date().isoformat(),
             username=session.get("username", "admin"),
         )
@@ -65,6 +72,8 @@ def create_app() -> Flask:
             {
                 "settings": load_settings(),
                 "icici": icici.credentials_status(),
+                "dhan": dhan.credentials_status(),
+                "log_settings": _load_log_settings(),
                 "live_config": _load_live_config(),
                 "live_state": _load_live_state(),
                 "broker_orders": _load_broker_orders(),
@@ -229,6 +238,78 @@ def create_app() -> Flask:
         except Exception as exc:
             return jsonify({"error": f"ICICI session test failed: {exc}"}), 500
         return jsonify({"credentials": icici.credentials_status(), "test": test})
+
+    @app.post("/api/dhan/session")
+    @_login_required
+    def api_dhan_session():
+        payload = request.get_json(silent=True) or {}
+        try:
+            dhan.save_credentials(
+                client_id=str(payload.get("client_id", "")),
+                access_token=str(payload.get("access_token", "")),
+            )
+            profile = dhan.profile()
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"Dhan session test failed: {exc}"}), 500
+        return jsonify({"credentials": dhan.credentials_status(), "profile": profile})
+
+    @app.get("/api/dhan/summary")
+    @_login_required
+    def api_dhan_summary():
+        try:
+            payload = {
+                "credentials": dhan.credentials_status(),
+                "profile": dhan.profile(),
+                "funds": dhan.funds(),
+                "holdings": dhan.holdings(),
+                "positions": dhan.positions(),
+                "orders": dhan.order_book(),
+            }
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"Dhan summary fetch failed: {exc}"}), 500
+        return jsonify(payload)
+
+    @app.get("/api/dhan/trades")
+    @_login_required
+    def api_dhan_trades():
+        try:
+            trades = dhan.trade_book(
+                from_date=_optional_text(request.args.get("from_date")),
+                to_date=_optional_text(request.args.get("to_date")),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"Dhan trade book fetch failed: {exc}"}), 500
+        return jsonify({"trades": trades})
+
+    @app.post("/api/dhan/import/holding")
+    @_login_required
+    def api_dhan_import_holding():
+        payload = request.get_json(silent=True) or {}
+        try:
+            state = _import_broker_holding(payload.get("row") or payload, broker="dhan")
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"Dhan holding import failed: {exc}"}), 500
+        return jsonify({"state": state})
+
+    @app.post("/api/dhan/import/trade")
+    @_login_required
+    def api_dhan_import_trade():
+        payload = request.get_json(silent=True) or {}
+        try:
+            state = _import_broker_trade(payload.get("row") or payload)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"Dhan trade import failed: {exc}"}), 500
+        return jsonify({"state": state})
 
     @app.post("/api/icici/save")
     @_login_required
@@ -395,6 +476,22 @@ def create_app() -> Flask:
             return jsonify({"error": f"ICICI trade book fetch failed: {exc}"}), 500
         return jsonify({"trades": trades})
 
+    @app.get("/api/logs")
+    @_login_required
+    def api_logs():
+        lines = int(request.args.get("lines", "300") or 300)
+        return jsonify({"settings": _load_log_settings(), "path": str(LOG_PATH), "lines": _tail_log(lines)})
+
+    @app.post("/api/logs/settings")
+    @_login_required
+    def api_logs_settings():
+        payload = request.get_json(silent=True) or {}
+        settings = _save_log_settings(
+            enabled=bool(payload.get("enabled", True)),
+            level=str(payload.get("level", "INFO")),
+        )
+        return jsonify({"settings": settings})
+
     @app.post("/api/icici/import/holding")
     @_login_required
     def api_icici_import_holding():
@@ -508,6 +605,54 @@ def _load_live_config() -> dict[str, Any]:
     return data
 
 
+def _broker_codes() -> dict[str, dict[str, str]]:
+    aliases = load_icici_symbol_aliases()
+    codes: dict[str, dict[str, str]] = {}
+    for symbol in ETF_UNIVERSE:
+        value = aliases.get(symbol, "")
+        icici_code = str(value.get("stock_code", "")) if isinstance(value, dict) else str(value or "")
+        dhan_code = symbol.split(":", maxsplit=1)[-1]
+        codes[symbol] = {"icici": icici_code or dhan_code, "dhan": dhan_code}
+    return codes
+
+
+def _load_log_settings() -> dict[str, Any]:
+    data = load_json(LOG_SETTINGS_PATH, {"enabled": True, "level": "INFO"})
+    level = str(data.get("level", "INFO")).upper()
+    if level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        level = "INFO"
+    return {"enabled": bool(data.get("enabled", True)), "level": level}
+
+
+def _save_log_settings(enabled: bool, level: str) -> dict[str, Any]:
+    settings = {"enabled": bool(enabled), "level": str(level or "INFO").upper()}
+    if settings["level"] not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        settings["level"] = "INFO"
+    save_json(LOG_SETTINGS_PATH, settings)
+    _configure_logging()
+    LOGGER.info("Log settings updated: enabled=%s level=%s", settings["enabled"], settings["level"])
+    return settings
+
+
+def _configure_logging() -> None:
+    settings = _load_log_settings()
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, settings["level"], logging.INFO) if settings["enabled"] else logging.CRITICAL + 1)
+    if not any(isinstance(handler, logging.FileHandler) and Path(handler.baseFilename) == LOG_PATH for handler in root.handlers):
+        handler = logging.FileHandler(LOG_PATH, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        root.addHandler(handler)
+
+
+def _tail_log(lines: int) -> list[str]:
+    if not LOG_PATH.exists():
+        return []
+    keep = max(min(lines, 2000), 50)
+    with LOG_PATH.open(encoding="utf-8", errors="replace") as file:
+        return file.readlines()[-keep:]
+
+
 def _load_latest_report() -> dict[str, Any] | None:
     if not LIVE_REPORT_PATH.exists():
         return None
@@ -615,7 +760,7 @@ def _book_report_action(action_id: str, quantity: Any, price: Any, product: str,
     return state
 
 
-def _import_broker_holding(row: Any) -> dict[str, Any]:
+def _import_broker_holding(row: Any, broker: str = "icici") -> dict[str, Any]:
     if not isinstance(row, dict):
         raise ValueError("Broker holding row is required.")
     symbol = str(row.get("symbol", "")).strip().upper()
@@ -646,6 +791,8 @@ def _import_broker_holding(row: Any) -> dict[str, Any]:
         "cost_basis": value,
         "funding_mode": funding_mode,
         "mtf_loan": mtf_loan,
+        "margin_used": margin_amount,
+        "broker": broker,
     }
     state["cash"] = float(state.get("cash", config["initial_capital"]) or 0) + previous_cash_required - cash_required
     save_live_state(state, LIVE_STATE_PATH)
@@ -697,6 +844,7 @@ def _broker_row_action(row: dict[str, Any]) -> dict[str, Any]:
         "funding_mode": funding_mode,
         "mtf_loan": mtf_loan,
         "broker_order_id": str(row.get("order_id", "")).strip(),
+        "broker": str(row.get("broker", "")).strip(),
         "reason": "icici_import",
     }
 
@@ -707,6 +855,9 @@ def _action_with_order_values(action: dict[str, Any], state: dict[str, Any], qua
     order_price = _positive_number(price if price is not None else action.get("price"), "Price")
     value = shares * order_price
     funding_mode = "mtf" if str(product).strip().lower() == "mtf" else "delivery"
+    mtf_multiple = max(float(_load_live_config().get("mtf_funded_multiple", 3) or 3), 1.0)
+    estimated_margin = value / mtf_multiple if funding_mode == "mtf" and booked.get("side") == "BUY" else value
+    estimated_loan = max(value - estimated_margin, 0.0) if funding_mode == "mtf" and booked.get("side") == "BUY" else 0.0
     booked.update(
         {
             "shares": shares,
@@ -714,8 +865,9 @@ def _action_with_order_values(action: dict[str, Any], state: dict[str, Any], qua
             "value": value,
             "broker_order_id": broker_order_id,
             "funding_mode": funding_mode,
-            "mtf_loan": value if funding_mode == "mtf" and booked.get("side") == "BUY" else 0.0,
-            "cash_required": 0.0 if funding_mode == "mtf" and booked.get("side") == "BUY" else value,
+            "mtf_loan": estimated_loan,
+            "margin_used": estimated_margin if funding_mode == "mtf" and booked.get("side") == "BUY" else 0.0,
+            "cash_required": estimated_margin if funding_mode == "mtf" and booked.get("side") == "BUY" else value,
         }
     )
     if booked.get("side") == "SELL":
@@ -769,6 +921,10 @@ def _normalize_holdings(value: Any) -> dict[str, Any]:
             "cost_basis": float(row.get("cost_basis", shares * entry_price) or shares * entry_price),
             "funding_mode": funding_mode,
             "mtf_loan": float(row.get("mtf_loan", 0) or 0),
+            "margin_used": float(row.get("margin_used", 0) or 0),
+            "broker": str(row.get("broker", "")).strip(),
+            "entry_ema": float(row.get("entry_ema", 0) or 0),
+            "entry_low": float(row.get("entry_low", 0) or 0),
         }
     return holdings
 
@@ -800,6 +956,7 @@ def _normalize_trades(value: Any) -> list[dict[str, Any]]:
                 "reason": str(row.get("reason", "manual")),
                 "funding_mode": str(row.get("funding_mode", "delivery")).strip().lower(),
                 "broker_order_id": str(row.get("broker_order_id", "")).strip(),
+                "broker": str(row.get("broker", "")).strip(),
             }
         )
         trades.append(trade)

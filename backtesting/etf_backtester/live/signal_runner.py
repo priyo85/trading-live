@@ -1044,6 +1044,10 @@ def _apply_actions(state: dict[str, Any], actions: list[dict[str, Any]], config:
                 "cost_basis": float(action["value"]),
                 "funding_mode": str(action.get("funding_mode", "delivery")).lower(),
                 "mtf_loan": float(action.get("mtf_loan", 0) or 0),
+                "margin_used": float(action.get("margin_used", 0) or 0),
+                "broker": str(action.get("broker", "")),
+                "entry_ema": float(action.get("entry_ema", 0) or 0),
+                "entry_low": float(action.get("entry_low", 0) or 0),
             }
             trades.append(action)
 

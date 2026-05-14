@@ -117,12 +117,47 @@ label {
   padding: 20px clamp(14px, 3vw, 28px) 36px;
 }
 
+.tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+.tab {
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.tab.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
 .toolbar {
   display: grid;
   grid-template-columns: minmax(140px, 1fr) minmax(130px, 180px) auto auto;
   gap: 12px;
   align-items: end;
   margin-bottom: 16px;
+}
+
+.broker-toolbar {
+  grid-template-columns: minmax(150px, 190px) minmax(150px, 190px) auto auto auto;
+}
+
+.logs-toolbar {
+  grid-template-columns: minmax(140px, 180px) minmax(120px, 160px) auto;
 }
 
 .kpis {
@@ -157,6 +192,32 @@ label {
   margin-top: 8px;
   font-size: clamp(1rem, 2vw, 1.45rem);
   overflow-wrap: anywhere;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.summary-grid article {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfc;
+}
+
+.summary-grid span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.summary-grid strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1rem;
 }
 
 .grid {
@@ -427,6 +488,8 @@ th {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  cursor: pointer;
+  user-select: none;
 }
 
 tr:last-child td {
@@ -461,6 +524,11 @@ tr:last-child td {
   font-size: 0.84rem;
 }
 
+.logs-box {
+  min-height: 420px;
+  max-height: 620px;
+}
+
 .login-page {
   min-height: 100vh;
   display: grid;
@@ -484,7 +552,10 @@ tr:last-child td {
   .kpis,
   .grid,
   .icici-grid,
-  .order-grid {
+  .order-grid,
+  .broker-toolbar,
+  .logs-toolbar,
+  .summary-grid {
     grid-template-columns: 1fr;
   }
 

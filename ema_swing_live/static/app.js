@@ -7,6 +7,10 @@ const state = {
   iciciOrderBook: null,
   iciciPortfolioRows: [],
   iciciTradeRows: [],
+  dhanPortfolioRows: [],
+  dhanTradeRows: [],
+  dhanOrderRows: [],
+  logSettings: {},
 };
 
 const $ = (id) => document.getElementById(id);
@@ -24,6 +28,11 @@ function money(value) {
 function pct(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "";
   return `${(Number(value) * 100).toFixed(2)}%`;
+}
+
+function optionalPct(value) {
+  const text = pct(value);
+  return text || "-";
 }
 
 async function api(path, options = {}) {
@@ -49,13 +58,17 @@ function renderStatus(payload) {
   state.settings = payload.settings || {};
   state.liveState = payload.live_state || {};
   state.brokerOrders = payload.broker_orders || [];
+  state.logSettings = payload.log_settings || {};
   $("dataProvider").value = state.settings.data_provider || "auto";
   renderConfig(state.config || {});
   renderReport(state.report);
   renderIcici(payload.icici || {});
+  renderDhan(payload.dhan || {});
   renderBrokerOrders();
   renderLedger();
+  renderLogSettings();
   checkIciciConnection();
+  defaultDates();
 }
 
 function renderConfig(config) {
@@ -71,6 +84,24 @@ function renderIcici(credentials) {
   $("iciciResult").textContent = credentials.configured
     ? `Configured: ${credentials.masked_api_key || "yes"}\nSecret: ${credentials.masked_api_secret || "saved"}\nSession: ${credentials.masked_session_token || "saved"}\n${credentials.path || ""}`
     : "Not configured. Enter API key/secret, use Open Login to generate a session token, then Save & Test.";
+}
+
+function renderDhan(credentials) {
+  if (credentials.client_id && !$("dhanClientId").value) $("dhanClientId").value = credentials.client_id;
+  if (credentials.access_token && !$("dhanAccessToken").value) $("dhanAccessToken").value = credentials.access_token;
+  const badge = $("dhanConnection");
+  if (!badge) return;
+  badge.classList.toggle("ok", Boolean(credentials.configured));
+  badge.classList.toggle("bad", !credentials.configured);
+  badge.textContent = credentials.configured ? "Configured" : "Not configured";
+  badge.title = credentials.path || "";
+}
+
+function defaultDates() {
+  const today = new Date().toISOString().slice(0, 10);
+  const start = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  ["iciciFromDate", "dhanFromDate"].forEach((id) => { if ($(id) && !$(id).value) $(id).value = start; });
+  ["iciciToDate", "dhanToDate"].forEach((id) => { if ($(id) && !$(id).value) $(id).value = today; });
 }
 
 function setIciciConnection(connected, detail = "") {
@@ -216,18 +247,18 @@ function renderIciciPortfolioRows(rows) {
       <td>${money(row.quantity)}</td>
       <td>${money(row.price)}</td>
       <td>${money(row.value)}</td>
-      <td>${money(row.mtf_loan)}</td>
       <td>${money(row.margin_amount)}</td>
+      <td>${money(row.mtf_loan)}</td>
       <td><button type="button" data-import-icici-holding>Import Holding</button></td>
     </tr>
-  `).join("") : `<tr><td colspan="9">No ICICI portfolio rows returned.</td></tr>`;
+  `).join("") : `<tr><td colspan="9">No portfolio rows returned.</td></tr>`;
 }
 
-function renderIciciTradeRows(rows) {
-  const body = $("iciciTradesBody");
+function renderTradeRows(bodyId, rows, datasetName, buttonAttr) {
+  const body = $(bodyId);
   if (!body) return;
   body.innerHTML = rows.length ? rows.map((row, index) => `
-    <tr data-icici-trade-index="${index}">
+    <tr data-${datasetName}-index="${index}">
       <td>${escapeHtml(row.date || "")}</td>
       <td>${escapeHtml(row.symbol || row.stock_code || "")}</td>
       <td>${escapeHtml(row.side || "")}</td>
@@ -235,37 +266,96 @@ function renderIciciTradeRows(rows) {
       <td>${money(row.quantity)}</td>
       <td>${money(row.price)}</td>
       <td>${money(row.value)}</td>
+      <td>${money(row.margin_amount)}</td>
       <td>${money(row.mtf_loan)}</td>
       <td>${escapeHtml(row.order_id || "")}</td>
-      <td><button type="button" data-import-icici-trade>Import Trade</button></td>
+      <td><button type="button" ${buttonAttr}>Import Trade</button></td>
     </tr>
-  `).join("") : `<tr><td colspan="10">No ICICI trade rows returned.</td></tr>`;
+  `).join("") : `<tr><td colspan="11">No trade rows returned.</td></tr>`;
+}
+
+function renderIciciTradeRows(rows) {
+  renderTradeRows("iciciTradesBody", rows, "icici-trade", "data-import-icici-trade");
+}
+
+function renderDhanTradeRows(rows) {
+  renderTradeRows("dhanTradesBody", rows, "dhan-trade", "data-import-dhan-trade");
+}
+
+function renderDhanOrderRows(rows) {
+  const body = $("dhanOrdersBody");
+  if (!body) return;
+  body.innerHTML = rows.length ? rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.date || "")}</td>
+      <td>${escapeHtml(row.symbol || row.stock_code || "")}</td>
+      <td>${escapeHtml(row.side || "")}</td>
+      <td>${escapeHtml(row.product || "")}</td>
+      <td>${money(row.quantity)}</td>
+      <td>${money(row.price)}</td>
+      <td><span class="status-pill">${escapeHtml(row.status || "")}</span></td>
+      <td>${escapeHtml(row.order_id || "")}</td>
+      <td>${escapeHtml(row.message || "")}</td>
+    </tr>
+  `).join("") : `<tr><td colspan="9">No Dhan broker orders returned.</td></tr>`;
+}
+
+function renderDhanPortfolioRows(rows) {
+  const body = $("dhanPortfolioBody");
+  if (!body) return;
+  body.innerHTML = rows.length ? rows.map((row, index) => `
+    <tr data-dhan-portfolio-index="${index}">
+      <td>${escapeHtml(row.source || "Dhan")}</td>
+      <td>${escapeHtml(row.symbol || row.stock_code || "")}</td>
+      <td>${escapeHtml(row.funding_mode || row.product || "")}</td>
+      <td>${money(row.quantity)}</td>
+      <td>${money(row.price)}</td>
+      <td>${money(row.value)}</td>
+      <td>${money(row.margin_amount)}</td>
+      <td>${money(row.mtf_loan)}</td>
+      <td><button type="button" data-import-dhan-holding>Import Holding</button></td>
+    </tr>
+  `).join("") : `<tr><td colspan="9">No Dhan rows returned.</td></tr>`;
 }
 
 function renderHoldings(reportHoldings) {
   renderLedgerCash();
   const reportBySymbol = new Map((reportHoldings || []).map((row) => [row.symbol, row]));
   const holdings = Object.values(state.liveState?.holdings || {});
-  $("holdingsBody").innerHTML = holdings.length ? holdings.map((holding) => holdingRow(holding, reportBySymbol.get(holding.symbol))).join("") : `<tr><td colspan="9">No strategy holdings.</td></tr>`;
+  $("holdingsBody").innerHTML = holdings.length ? holdings.map((holding) => holdingRow(holding, reportBySymbol.get(holding.symbol))).join("") : `<tr><td colspan="16">No strategy holdings.</td></tr>`;
 }
 
 function holdingRow(holding = {}, report = {}) {
   const mode = holding.funding_mode || report.funding_mode || "delivery";
+  const shares = Number(holding.shares || 0);
+  const entry = Number(holding.entry_price || 0);
+  const invested = Number(holding.cost_basis || shares * entry);
+  const cmp = Number(report.last_price ?? entry);
+  const mtfLoan = Number(holding.mtf_loan || 0);
+  const gain = (shares * cmp) - invested;
+  const gainPct = invested > 0 ? gain / invested : 0;
   return `
     <tr class="holding-row">
+      <td><input class="holding-date" value="${escapeAttr(holding.entry_date || "")}"></td>
       <td><input class="holding-symbol" value="${escapeAttr(holding.symbol || "")}"></td>
+      <td>${escapeHtml(descriptionFor(holding.symbol, holding.broker))}</td>
       <td><input class="holding-shares" inputmode="numeric" value="${escapeAttr(holding.shares || "")}"></td>
       <td><input class="holding-entry" inputmode="decimal" value="${escapeAttr(holding.entry_price || "")}"></td>
-      <td><input class="holding-date" value="${escapeAttr(holding.entry_date || "")}"></td>
+      <td>${money(invested)}</td>
+      <td>${money(cmp)}</td>
+      <td><input class="holding-ema" inputmode="decimal" value="${escapeAttr(holding.entry_ema || "")}"></td>
+      <td><input class="holding-low" inputmode="decimal" value="${escapeAttr(holding.entry_low || "")}"></td>
+      <td>${money(gain)}</td>
+      <td>${pct(gainPct)}</td>
+      <td><input class="holding-margin" inputmode="decimal" value="${escapeAttr(holding.margin_used || 0)}"></td>
+      <td><input class="holding-loan" inputmode="decimal" value="${escapeAttr(mtfLoan)}"></td>
       <td>
         <select class="holding-mode">
           <option value="delivery" ${mode !== "mtf" ? "selected" : ""}>Delivery</option>
           <option value="mtf" ${mode === "mtf" ? "selected" : ""}>MTF</option>
         </select>
       </td>
-      <td><input class="holding-loan" inputmode="decimal" value="${escapeAttr(holding.mtf_loan || 0)}"></td>
-      <td>${money(report.last_price)}</td>
-      <td>${money(report.unrealized_profit)}</td>
+      <td><input class="holding-broker" value="${escapeAttr(holding.broker || "")}"></td>
       <td><button type="button" data-remove-row>Remove</button></td>
     </tr>
   `;
@@ -274,6 +364,121 @@ function holdingRow(holding = {}, report = {}) {
 function renderLedger() {
   const trades = state.liveState?.trades || [];
   $("ledgerBody").innerHTML = trades.length ? trades.map((trade) => ledgerRow(trade)).join("") : `<tr><td colspan="9">No booked orders.</td></tr>`;
+  renderCompletedLedger(trades);
+}
+
+function renderCompletedLedger(trades) {
+  const completed = completedTrades(trades || []);
+  const body = $("completedLedgerBody");
+  if (body) {
+    body.innerHTML = completed.length ? completed.map((trade) => `
+      <tr>
+        <td>${escapeHtml(trade.buyDate)}</td>
+        <td>${escapeHtml(trade.symbol)}</td>
+        <td>${escapeHtml(descriptionFor(trade.symbol, trade.broker))}</td>
+        <td>${money(trade.buyPrice)}</td>
+        <td>${money(trade.shares)}</td>
+        <td>${money(trade.buyValue)}</td>
+        <td>${money(trade.sellPrice)}</td>
+        <td>${escapeHtml(trade.sellDate)}</td>
+        <td>${money(trade.holdingDays)}</td>
+        <td>${money(trade.profit)}</td>
+        <td>${pct(trade.profitPct)}</td>
+      </tr>
+    `).join("") : `<tr><td colspan="11">No completed sells yet.</td></tr>`;
+  }
+  renderLedgerSummary(completed);
+}
+
+function completedTrades(trades) {
+  const openBuys = new Map();
+  const completed = [];
+  trades.forEach((trade) => {
+    const symbol = trade.symbol;
+    const side = String(trade.side || "").toUpperCase();
+    if (!symbol) return;
+    if (side === "BUY") {
+      if (!openBuys.has(symbol)) openBuys.set(symbol, []);
+      openBuys.get(symbol).push(trade);
+      return;
+    }
+    if (side !== "SELL" || !openBuys.get(symbol)?.length) return;
+    const buy = openBuys.get(symbol).shift();
+    const buyValue = Number(buy.value || Number(buy.shares || 0) * Number(buy.price || 0));
+    const sellValue = Number(trade.value || Number(trade.shares || 0) * Number(trade.price || 0));
+    const profit = Number(trade.profit ?? sellValue - buyValue);
+    const buyDate = buy.signal_date || buy.date || "";
+    const sellDate = trade.signal_date || trade.date || "";
+    completed.push({
+      symbol,
+      broker: trade.broker || buy.broker || "",
+      buyDate,
+      sellDate,
+      buyPrice: Number(buy.price || 0),
+      sellPrice: Number(trade.price || 0),
+      shares: Number(trade.shares || buy.shares || 0),
+      buyValue,
+      sellValue,
+      profit,
+      profitPct: buyValue > 0 ? profit / buyValue : 0,
+      holdingDays: daysBetween(buyDate, sellDate),
+    });
+  });
+  return completed;
+}
+
+function renderLedgerSummary(completed) {
+  const target = $("ledgerSummary");
+  if (!target) return;
+  const totalProfit = completed.reduce((sum, row) => sum + row.profit, 0);
+  const totalInvested = completed.reduce((sum, row) => sum + row.buyValue, 0);
+  const monthly = groupSum(completed, (row) => String(row.sellDate || "").slice(0, 7), "profit");
+  const yearly = groupSum(completed, (row) => String(row.sellDate || "").slice(0, 4), "profit");
+  const maxMonthlyInvested = Math.max(0, ...Object.values(groupSum(completed, (row) => String(row.buyDate || "").slice(0, 7), "buyValue")));
+  target.innerHTML = [
+    summaryCard("Total Profit", money(totalProfit)),
+    summaryCard("Total % Profit", pct(totalInvested > 0 ? totalProfit / totalInvested : 0)),
+    summaryCard("Monthly Profit", summaryPairs(monthly)),
+    summaryCard("Max Invested/Month", money(maxMonthlyInvested)),
+    summaryCard("Yearly Profit", summaryPairs(yearly)),
+    summaryCard("XIRR / CAGR", `${optionalPct(state.report?.xirr)} / ${optionalPct(liveCagr())}`),
+  ].join("");
+}
+
+function liveCagr() {
+  const start = Date.parse(state.liveState?.created_at || "");
+  const end = Date.parse(state.report?.run_date || state.report?.run_time || "");
+  const capital = Number(state.config?.initial_capital || 0);
+  const equity = Number(state.report?.equity || 0);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || capital <= 0 || equity <= 0) return null;
+  const years = (end - start) / (365.25 * 24 * 60 * 60 * 1000);
+  if (years <= 0) return null;
+  return Math.pow(equity / capital, 1 / years) - 1;
+}
+
+function summaryCard(label, value) {
+  return `<article><span>${escapeHtml(label)}</span><strong>${value || "-"}</strong></article>`;
+}
+
+function summaryPairs(values) {
+  const entries = Object.entries(values).filter(([key]) => key).slice(-4);
+  return entries.length ? entries.map(([key, value]) => `${key}: ${money(value)}`).join("<br>") : "-";
+}
+
+function groupSum(rows, keyFn, field) {
+  return rows.reduce((acc, row) => {
+    const key = keyFn(row);
+    if (!key) return acc;
+    acc[key] = (acc[key] || 0) + Number(row[field] || 0);
+    return acc;
+  }, {});
+}
+
+function daysBetween(start, end) {
+  const from = Date.parse(start);
+  const to = Date.parse(end);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return "";
+  return Math.max(Math.round((to - from) / 86400000), 0);
 }
 
 function ledgerRow(trade = {}) {
@@ -325,6 +530,15 @@ function sourceSummary(row) {
   const sourceDate = row.source_date ? ` ${row.source_date}` : "";
   const sourceValues = row.source_price && row.source_ema ? ` ${money(row.source_price)}/${money(row.source_ema)}` : "";
   return `${source}${sourceDate}${sourceValues}`;
+}
+
+function descriptionFor(symbol, broker = "") {
+  const codes = window.BROKER_CODES?.[symbol] || {};
+  const icici = codes.icici || symbol?.split(":").pop() || "";
+  const dhan = codes.dhan || symbol?.split(":").pop() || "";
+  if (String(broker || "").toLowerCase() === "dhan") return `Dhan ${dhan}`;
+  if (String(broker || "").toLowerCase() === "icici") return `ICICI ${icici}`;
+  return `ICICI ${icici} / Dhan ${dhan}`;
 }
 
 function actionPayload(card, dryRun) {
@@ -380,6 +594,10 @@ function serializeHoldings() {
     entry_date: row.querySelector(".holding-date").value,
     funding_mode: row.querySelector(".holding-mode").value,
     mtf_loan: row.querySelector(".holding-loan").value,
+    margin_used: row.querySelector(".holding-margin").value,
+    broker: row.querySelector(".holding-broker").value,
+    entry_ema: row.querySelector(".holding-ema").value,
+    entry_low: row.querySelector(".holding-low").value,
   })).filter((row) => row.symbol.trim());
 }
 
@@ -432,7 +650,8 @@ async function refreshBrokerOrderBook() {
 
 async function loadIciciPortfolio() {
   $("iciciPortfolioStatus").textContent = "Loading...";
-  const payload = await api("/api/icici/portfolio");
+  const query = dateQuery("iciciFromDate", "iciciToDate");
+  const payload = await api(`/api/icici/portfolio${query}`);
   const holdingRows = payload.portfolio_holdings?.rows || [];
   const positionRows = payload.positions?.rows || [];
   state.iciciPortfolioRows = [
@@ -440,17 +659,50 @@ async function loadIciciPortfolio() {
     ...positionRows.map((row) => ({ ...row, source: "Positions" })),
   ].filter((row) => row.symbol && Number(row.quantity || 0) > 0);
   renderIciciPortfolioRows(state.iciciPortfolioRows);
+  $("iciciBrokerSummary").textContent = JSON.stringify({ funds: payload.funds?.response, demat: payload.demat_holdings?.response }, null, 2);
   $("iciciResult").textContent = JSON.stringify(payload.funds?.response || payload, null, 2);
   $("iciciPortfolioStatus").textContent = `${state.iciciPortfolioRows.length} rows`;
 }
 
 async function loadIciciTrades() {
   $("iciciTradesStatus").textContent = "Loading...";
-  const payload = await api("/api/icici/trades");
+  const payload = await api(`/api/icici/trades${dateQuery("iciciFromDate", "iciciToDate")}`);
   state.iciciTradeRows = (payload.trades?.rows || []).filter((row) => row.symbol && Number(row.quantity || 0) > 0);
   renderIciciTradeRows(state.iciciTradeRows);
   $("iciciResult").textContent = JSON.stringify(payload.trades?.response || payload, null, 2);
   $("iciciTradesStatus").textContent = `${state.iciciTradeRows.length} rows`;
+}
+
+async function loadDhanSummary() {
+  $("dhanResult").textContent = "Loading...";
+  const payload = await api("/api/dhan/summary");
+  const holdingRows = payload.holdings?.rows || [];
+  const positionRows = payload.positions?.rows || [];
+  state.dhanPortfolioRows = [
+    ...holdingRows.map((row) => ({ ...row, source: "Holdings" })),
+    ...positionRows.map((row) => ({ ...row, source: "Positions" })),
+  ].filter((row) => row.symbol && Number(row.quantity || 0) > 0);
+  state.dhanOrderRows = payload.orders?.rows || [];
+  renderDhanPortfolioRows(state.dhanPortfolioRows);
+  renderDhanOrderRows(state.dhanOrderRows);
+  $("dhanResult").textContent = JSON.stringify({ profile: payload.profile?.response, funds: payload.funds?.response, orders: payload.orders?.response }, null, 2);
+  renderDhan(payload.credentials || {});
+}
+
+async function loadDhanTrades() {
+  $("dhanResult").textContent = "Loading trades...";
+  const payload = await api(`/api/dhan/trades${dateQuery("dhanFromDate", "dhanToDate")}`);
+  state.dhanTradeRows = (payload.trades?.rows || []).filter((row) => row.symbol && Number(row.quantity || 0) > 0);
+  renderDhanTradeRows(state.dhanTradeRows);
+  $("dhanResult").textContent = JSON.stringify(payload.trades?.response || payload, null, 2);
+}
+
+function dateQuery(fromId, toId) {
+  const params = new URLSearchParams();
+  if ($(fromId)?.value) params.set("from_date", $(fromId).value);
+  if ($(toId)?.value) params.set("to_date", $(toId).value);
+  const text = params.toString();
+  return text ? `?${text}` : "";
 }
 
 async function importIciciHolding(index) {
@@ -458,7 +710,7 @@ async function importIciciHolding(index) {
   if (!row) return;
   const payload = await api("/api/icici/import/holding", {
     method: "POST",
-    body: JSON.stringify({ row }),
+    body: JSON.stringify({ row: { ...row, broker: "icici" } }),
   });
   state.liveState = payload.state;
   renderReport(state.report);
@@ -471,7 +723,33 @@ async function importIciciTrade(index) {
   if (!row) return;
   const payload = await api("/api/icici/import/trade", {
     method: "POST",
-    body: JSON.stringify({ row }),
+    body: JSON.stringify({ row: { ...row, broker: "icici" } }),
+  });
+  state.liveState = payload.state;
+  renderReport(state.report);
+  renderLedger();
+  setMessage(`Imported ${row.symbol} trade into strategy ledger.`);
+}
+
+async function importDhanHolding(index) {
+  const row = state.dhanPortfolioRows[index];
+  if (!row) return;
+  const payload = await api("/api/dhan/import/holding", {
+    method: "POST",
+    body: JSON.stringify({ row: { ...row, broker: "dhan" } }),
+  });
+  state.liveState = payload.state;
+  renderReport(state.report);
+  renderLedger();
+  setMessage(`Imported ${row.symbol} into strategy holdings.`);
+}
+
+async function importDhanTrade(index) {
+  const row = state.dhanTradeRows[index];
+  if (!row) return;
+  const payload = await api("/api/dhan/import/trade", {
+    method: "POST",
+    body: JSON.stringify({ row: { ...row, broker: "dhan" } }),
   });
   state.liveState = payload.state;
   renderReport(state.report);
@@ -543,6 +821,14 @@ on("loadIciciTrades", "click", () => {
   loadIciciTrades().catch((error) => setMessage(error.message, true));
 });
 
+on("loadDhanSummary", "click", () => {
+  loadDhanSummary().catch((error) => setMessage(error.message, true));
+});
+
+on("loadDhanTrades", "click", () => {
+  loadDhanTrades().catch((error) => setMessage(error.message, true));
+});
+
 on("clearLedger", "click", async () => {
   if (!confirm("Clear the local strategy ledger?")) return;
   try {
@@ -610,6 +896,26 @@ on("iciciForm", "submit", async (event) => {
   } catch (error) {
     $("iciciResult").textContent = error.message;
     setIciciConnection(false, error.message);
+  }
+});
+
+on("dhanForm", "submit", async (event) => {
+  event.preventDefault();
+  $("dhanResult").textContent = "Testing...";
+  try {
+    const payload = await api("/api/dhan/session", {
+      method: "POST",
+      body: JSON.stringify({
+        client_id: $("dhanClientId").value,
+        access_token: $("dhanAccessToken").value,
+      }),
+    });
+    renderDhan(payload.credentials || {});
+    $("dhanResult").textContent = JSON.stringify(payload.profile, null, 2);
+    setMessage("Dhan credentials saved.");
+  } catch (error) {
+    $("dhanResult").textContent = error.message;
+    setMessage(error.message, true);
   }
 });
 
@@ -689,6 +995,18 @@ on("iciciTradesBody", "click", (event) => {
   importIciciTrade(Number(row.dataset.iciciTradeIndex)).catch((error) => setMessage(error.message, true));
 });
 
+on("dhanPortfolioBody", "click", (event) => {
+  const row = event.target.closest("tr");
+  if (!row || !event.target.matches("[data-import-dhan-holding]")) return;
+  importDhanHolding(Number(row.dataset.dhanPortfolioIndex)).catch((error) => setMessage(error.message, true));
+});
+
+on("dhanTradesBody", "click", (event) => {
+  const row = event.target.closest("tr");
+  if (!row || !event.target.matches("[data-import-dhan-trade]")) return;
+  importDhanTrade(Number(row.dataset.dhanTradeIndex)).catch((error) => setMessage(error.message, true));
+});
+
 document.body.addEventListener("click", (event) => {
   if (event.target.matches("[data-remove-row]")) {
     event.target.closest("tr")?.remove();
@@ -709,6 +1027,75 @@ on("addLedgerTrade", "click", () => {
 
 on("saveLedger", "click", () => {
   saveLiveState({ trades: serializeLedger() }).catch((error) => setMessage(error.message, true));
+});
+
+document.querySelectorAll("[data-tab]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("[data-tab]").forEach((tab) => tab.classList.toggle("active", tab === button));
+    document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === button.dataset.tab));
+  });
+});
+
+document.body.addEventListener("click", (event) => {
+  const th = event.target.closest("th");
+  const table = th?.closest(".sortable-table");
+  if (!th || !table) return;
+  const ascending = th.dataset.sortDir !== "asc";
+  sortTable(table, th.cellIndex, ascending);
+  [...th.parentElement.children].forEach((cell) => delete cell.dataset.sortDir);
+  th.dataset.sortDir = ascending ? "asc" : "desc";
+});
+
+function sortTable(table, columnIndex, ascending) {
+  const tbody = table.tBodies[0];
+  if (!tbody) return;
+  const rows = [...tbody.rows];
+  rows.sort((a, b) => compareCell(a.cells[columnIndex], b.cells[columnIndex], ascending));
+  rows.forEach((row) => tbody.appendChild(row));
+}
+
+function compareCell(aCell, bCell, ascending) {
+  const a = cellValue(aCell);
+  const b = cellValue(bCell);
+  const aNum = Number(String(a).replace(/,/g, ""));
+  const bNum = Number(String(b).replace(/,/g, ""));
+  const result = Number.isFinite(aNum) && Number.isFinite(bNum)
+    ? aNum - bNum
+    : String(a).localeCompare(String(b));
+  return ascending ? result : -result;
+}
+
+function cellValue(cell) {
+  const input = cell?.querySelector("input, select");
+  return input ? input.value : (cell?.textContent || "").trim();
+}
+
+function renderLogSettings() {
+  if ($("logsEnabled")) $("logsEnabled").checked = Boolean(state.logSettings.enabled ?? true);
+  if ($("logLevel")) $("logLevel").value = state.logSettings.level || "INFO";
+}
+
+async function refreshLogs() {
+  const payload = await api("/api/logs");
+  state.logSettings = payload.settings || {};
+  renderLogSettings();
+  $("logsOutput").textContent = (payload.lines || []).join("");
+}
+
+on("refreshLogs", "click", () => {
+  refreshLogs().catch((error) => setMessage(error.message, true));
+});
+
+on("logsForm", "submit", async (event) => {
+  event.preventDefault();
+  const payload = await api("/api/logs/settings", {
+    method: "POST",
+    body: JSON.stringify({ enabled: $("logsEnabled").checked, level: $("logLevel").value }),
+  });
+  state.logSettings = payload.settings || {};
+  renderLogSettings();
+  await refreshLogs();
+  setMessage("Log settings saved.");
 });
 
 setMessage("Dashboard ready.");

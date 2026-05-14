@@ -18,280 +18,266 @@
     </header>
 
     <main class="layout">
-      <section class="toolbar">
-        <label>
-          Data
-          <select id="dataProvider">
-            <option value="auto">Auto</option>
-            <option value="dhan">Dhan</option>
-            <option value="icici">ICICI</option>
-            <option value="yahoo">Yahoo</option>
-          </select>
-        </label>
-        <label>
-          Price
-          <select id="priceMode">
-            <option value="current">CMP</option>
-            <option value="daily_close">Daily close</option>
-          </select>
-        </label>
-        <button id="runSignals" class="primary" type="button">Run Signals</button>
-        <button id="refreshOrderBook" type="button">Refresh Orders</button>
-      </section>
+      <nav class="tabs" aria-label="Dashboard sections">
+        <button class="tab active" type="button" data-tab="dashboard">Dashboard</button>
+        <button class="tab" type="button" data-tab="strategyLedger">Strategy Ledger</button>
+        <button class="tab" type="button" data-tab="brokerLogin">Broker Login</button>
+        <button class="tab" type="button" data-tab="iciciTab">ICICI</button>
+        <button class="tab" type="button" data-tab="dhanTab">Dhan</button>
+        <button class="tab" type="button" data-tab="logsTab">Logs</button>
+      </nav>
 
       <section id="message" class="notice hidden"></section>
 
       <section class="kpis">
-        <article>
-          <span>Equity</span>
-          <strong id="kpiEquity">-</strong>
-        </article>
-        <article>
-          <span>Cash</span>
-          <strong id="kpiCash">-</strong>
-        </article>
-        <article>
-          <span>Holdings</span>
-          <strong id="kpiHoldings">-</strong>
-        </article>
-        <article>
-          <span>Run</span>
-          <strong id="kpiRun">-</strong>
-        </article>
+        <article><span>Equity</span><strong id="kpiEquity">-</strong></article>
+        <article><span>Strategy Cash</span><strong id="kpiCash">-</strong></article>
+        <article><span>Holdings</span><strong id="kpiHoldings">-</strong></article>
+        <article><span>Run</span><strong id="kpiRun">-</strong></article>
       </section>
 
-      <section class="grid">
-        <article class="panel">
+      <section id="dashboard" class="tab-panel active">
+        <section class="toolbar">
+          <label>
+            Data
+            <select id="dataProvider">
+              <option value="auto">Auto</option>
+              <option value="dhan">Dhan</option>
+              <option value="icici">ICICI</option>
+              <option value="yahoo">Yahoo</option>
+            </select>
+          </label>
+          <label>
+            Price
+            <select id="priceMode">
+              <option value="current">CMP</option>
+              <option value="daily_close">Daily close</option>
+            </select>
+          </label>
+          <button id="runSignals" class="primary" type="button">Run Signals</button>
+          <button id="clearLedger" class="danger" type="button">Clear Ledger</button>
+        </section>
+
+        <section class="grid">
+          <article class="panel">
+            <div class="panel-head"><h2>Generated Actions</h2></div>
+            <div id="actionsList" class="action-list"></div>
+          </article>
+
+          <article class="panel">
+            <h2>Run Configuration</h2>
+            <form id="configForm" class="stack">
+              <label>Initial capital<input id="initialCapital" inputmode="decimal"></label>
+              <label>Max positions<input id="maxPositions" inputmode="numeric"></label>
+              <label>Symbols<textarea id="symbolsText" rows="5"></textarea></label>
+              <button type="submit">Save Config</button>
+            </form>
+          </article>
+        </section>
+
+        <section class="panel">
           <div class="panel-head">
-            <h2>Generated Actions</h2>
-            <button id="clearLedger" class="danger" type="button">Clear Ledger</button>
+            <h2>Strategy Holdings</h2>
+            <div class="button-row tight">
+              <button id="addHolding" type="button">Add Holding</button>
+              <button id="saveHoldings" class="primary" type="button">Save Holdings</button>
+            </div>
           </div>
-          <div id="actionsList" class="action-list"></div>
-        </article>
+          <div class="table-wrap">
+            <table class="editable-table sortable-table">
+              <thead>
+                <tr>
+                  <th>Buy Date</th><th>NSE/Yahoo Code</th><th>Description</th><th>Buy Qty</th><th>Buy Price</th>
+                  <th>Total Invested</th><th>CMP</th><th>9 EMA Entry</th><th>Low Entry</th><th>Gain</th><th>% Gain</th>
+                  <th>Margin Used</th><th>MTF Loan</th><th>Mode</th><th>Broker</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="holdingsBody"></tbody>
+            </table>
+          </div>
+        </section>
 
-        <article class="panel">
-          <h2>Run Configuration</h2>
-          <form id="configForm" class="stack">
-            <label>
-              Initial capital
-              <input id="initialCapital" inputmode="decimal">
-            </label>
-            <label>
-              Max positions
-              <input id="maxPositions" inputmode="numeric">
-            </label>
-            <label>
-              Symbols
-              <textarea id="symbolsText" rows="5"></textarea>
-            </label>
-            <button type="submit">Save Config</button>
-          </form>
-        </article>
+        <section class="panel">
+          <h2>All Signals</h2>
+          <div class="table-wrap">
+            <table class="sortable-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th><th>Source</th><th>Signal</th><th>Source Px/EMA</th><th>Price</th>
+                  <th>Last Event</th><th>ATH Dist</th><th>Held</th>
+                </tr>
+              </thead>
+              <tbody id="signalsBody"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>ICICI Direct</h2>
-          <span id="iciciConnection" class="status-pill bad">Not connected</span>
-        </div>
-        <form id="iciciForm" class="icici-grid">
-          <label>
-            API key
-            <input id="iciciApiKey" autocomplete="off">
-          </label>
-          <label>
-            Secret key
-            <input id="iciciSecret" type="password" autocomplete="off">
-          </label>
-          <label>
-            Session token
-            <input id="iciciSession" type="password" autocomplete="off">
-          </label>
-          <label>
-            ETF code
-            <input id="iciciStock" value="GOLDEX">
-          </label>
-          <div class="button-row">
-            <button id="openIciciLogin" type="button">Open Login</button>
-            <button class="primary" type="submit">Save & Test</button>
-            <button id="testIciciQuote" type="button">Test Quote</button>
-            <button id="loadIciciPortfolio" type="button">Load Portfolio</button>
-            <button id="loadIciciTrades" type="button">Load Trades</button>
+      <section id="strategyLedger" class="tab-panel">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Completed Strategy Ledger</h2>
+            <div class="button-row tight">
+              <button id="addLedgerTrade" type="button">Add Trade</button>
+              <button id="saveLedger" class="primary" type="button">Save Ledger</button>
+            </div>
           </div>
-        </form>
+          <div id="ledgerSummary" class="summary-grid"></div>
+          <div class="table-wrap">
+            <table class="editable-table sortable-table">
+              <thead>
+                <tr>
+                  <th>Buy Date</th><th>ETF Code</th><th>Description</th><th>Buy Price</th><th>Buy Qty</th>
+                  <th>Amount Invested</th><th>Sell Price</th><th>Sell Date</th><th>Holding Days</th>
+                  <th>Profit</th><th>Profit %</th>
+                </tr>
+              </thead>
+              <tbody id="completedLedgerBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Editable Raw Booked Orders</h2>
+          <div class="table-wrap">
+            <table class="editable-table sortable-table">
+              <thead>
+                <tr><th>Date</th><th>Side</th><th>Symbol</th><th>Qty</th><th>Price</th><th>Product</th><th>Broker ID</th><th>Reason</th><th></th></tr>
+              </thead>
+              <tbody id="ledgerBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="brokerLogin" class="tab-panel">
+        <section class="panel">
+          <div class="panel-head"><h2>ICICI Direct Login</h2><span id="iciciConnection" class="status-pill bad">Not connected</span></div>
+          <form id="iciciForm" class="icici-grid">
+            <label>API key<input id="iciciApiKey" autocomplete="off"></label>
+            <label>Secret key<input id="iciciSecret" type="password" autocomplete="off"></label>
+            <label>Session token<input id="iciciSession" type="password" autocomplete="off"></label>
+            <label>ETF code<input id="iciciStock" value="GOLDEX"></label>
+            <div class="button-row">
+              <button id="openIciciLogin" type="button">Open Login</button>
+              <button class="primary" type="submit">Save & Test</button>
+              <button id="testIciciQuote" type="button">Test Quote</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2>Dhan Login</h2><span id="dhanConnection" class="status-pill bad">Not connected</span></div>
+          <form id="dhanForm" class="icici-grid">
+            <label>Client ID<input id="dhanClientId" autocomplete="off"></label>
+            <label>Access token<input id="dhanAccessToken" type="password" autocomplete="off"></label>
+            <div class="button-row">
+              <button class="primary" type="submit">Save & Test Dhan</button>
+            </div>
+          </form>
+        </section>
         <pre id="iciciResult" class="result-box"></pre>
       </section>
 
-      <section class="panel">
-        <div class="panel-head">
+      <section id="iciciTab" class="tab-panel">
+        <section class="toolbar broker-toolbar">
+          <label>From date<input id="iciciFromDate" type="date"></label>
+          <label>To date<input id="iciciToDate" type="date"></label>
+          <button id="loadIciciPortfolio" class="primary" type="button">Load Portfolio</button>
+          <button id="loadIciciTrades" type="button">Load Trades</button>
+          <button id="refreshOrderBook" type="button">Refresh Orders</button>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>ICICI Cash, Margin & Profile</h2><span id="iciciPortfolioStatus" class="soft-status"></span></div>
+          <pre id="iciciBrokerSummary" class="result-box compact-result"></pre>
+        </section>
+        <section class="panel">
           <h2>ICICI Portfolio Import</h2>
-          <span id="iciciPortfolioStatus" class="soft-status"></span>
-        </div>
-        <div class="table-wrap import-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Source</th>
-                <th>Symbol</th>
-                <th>Product</th>
-                <th>Qty</th>
-                <th>Avg</th>
-                <th>Value</th>
-                <th>MTF Loan</th>
-                <th>Margin</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="iciciPortfolioBody">
-              <tr><td colspan="9">Load ICICI portfolio to import holdings.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2>ICICI Trade Book Import</h2>
-          <span id="iciciTradesStatus" class="soft-status"></span>
-        </div>
-        <div class="table-wrap import-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Symbol</th>
-                <th>Side</th>
-                <th>Product</th>
-                <th>Qty</th>
-                <th>Price</th>
-                <th>Value</th>
-                <th>MTF Loan</th>
-                <th>Order ID</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="iciciTradesBody">
-              <tr><td colspan="10">Load ICICI trades to import executed orders.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Broker Orders</h2>
-          <span id="orderBookStatus" class="soft-status"></span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Symbol</th>
-                <th>Side</th>
-                <th>Product</th>
-                <th>Qty</th>
-                <th>Price</th>
-                <th>Status</th>
-                <th>Broker ID</th>
-                <th>Message</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="brokerOrdersBody"></tbody>
-          </table>
-        </div>
-        <pre id="orderResult" class="result-box compact-result"></pre>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Strategy Holdings</h2>
-          <div class="button-row tight">
-            <button id="addHolding" type="button">Add Holding</button>
-            <button id="saveHoldings" class="primary" type="button">Save Holdings</button>
+          <div class="table-wrap import-table">
+            <table class="sortable-table">
+              <thead><tr><th>Source</th><th>Symbol</th><th>Product</th><th>Qty</th><th>Avg</th><th>Value</th><th>Margin</th><th>MTF Loan</th><th></th></tr></thead>
+              <tbody id="iciciPortfolioBody"><tr><td colspan="9">Load ICICI portfolio to import holdings.</td></tr></tbody>
+            </table>
           </div>
-        </div>
-        <div class="ledger-cash-row">
-          <label>
-            Ledger cash
-            <input id="ledgerCash" inputmode="decimal">
-          </label>
-          <p class="hint">Cash is stored separately from holdings. If you remove or edit holdings manually, adjust ledger cash here and save.</p>
-        </div>
-        <div class="table-wrap">
-          <table class="editable-table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Qty</th>
-                <th>Entry</th>
-                <th>Entry Date</th>
-                <th>Mode</th>
-                <th>MTF Loan</th>
-                <th>Last</th>
-                <th>P/L</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="holdingsBody"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Booked Order Ledger</h2>
-          <div class="button-row tight">
-            <button id="addLedgerTrade" type="button">Add Trade</button>
-            <button id="saveLedger" class="primary" type="button">Save Ledger</button>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>ICICI Trade Book</h2><span id="iciciTradesStatus" class="soft-status"></span></div>
+          <div class="table-wrap import-table">
+            <table class="sortable-table">
+              <thead><tr><th>Date</th><th>Symbol</th><th>Side</th><th>Product</th><th>Qty</th><th>Price</th><th>Value</th><th>Margin</th><th>MTF Loan</th><th>Order ID</th><th></th></tr></thead>
+              <tbody id="iciciTradesBody"><tr><td colspan="11">Load ICICI trades to import executed orders.</td></tr></tbody>
+            </table>
           </div>
-        </div>
-        <div class="table-wrap">
-          <table class="editable-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Side</th>
-                <th>Symbol</th>
-                <th>Qty</th>
-                <th>Price</th>
-                <th>Product</th>
-                <th>Broker ID</th>
-                <th>Reason</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="ledgerBody"></tbody>
-          </table>
-        </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>ICICI Broker Orders</h2><span id="orderBookStatus" class="soft-status"></span></div>
+          <div class="table-wrap">
+            <table class="sortable-table">
+              <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Product</th><th>Qty</th><th>Price</th><th>Status</th><th>Broker ID</th><th>Message</th><th></th></tr></thead>
+              <tbody id="brokerOrdersBody"></tbody>
+            </table>
+          </div>
+          <pre id="orderResult" class="result-box compact-result"></pre>
+        </section>
       </section>
 
-      <section class="panel">
-        <h2>All Signals</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Source</th>
-                <th>Signal</th>
-                <th>Source Px/EMA</th>
-                <th>Price</th>
-                <th>Last Event</th>
-                <th>ATH Dist</th>
-                <th>Held</th>
-              </tr>
-            </thead>
-            <tbody id="signalsBody"></tbody>
-          </table>
-        </div>
+      <section id="dhanTab" class="tab-panel">
+        <section class="toolbar broker-toolbar">
+          <label>From date<input id="dhanFromDate" type="date"></label>
+          <label>To date<input id="dhanToDate" type="date"></label>
+          <button id="loadDhanSummary" class="primary" type="button">Load Dhan</button>
+          <button id="loadDhanTrades" type="button">Load Trades</button>
+        </section>
+        <section class="panel">
+          <h2>Dhan Cash, Margin & Profile</h2>
+          <pre id="dhanResult" class="result-box compact-result"></pre>
+        </section>
+        <section class="panel">
+          <h2>Dhan Holdings & Positions</h2>
+          <div class="table-wrap import-table">
+            <table class="sortable-table">
+              <thead><tr><th>Source</th><th>Symbol</th><th>Product</th><th>Qty</th><th>Avg</th><th>Value</th><th>Margin</th><th>MTF Loan</th><th></th></tr></thead>
+              <tbody id="dhanPortfolioBody"><tr><td colspan="9">Load Dhan holdings to import.</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="panel">
+          <h2>Dhan Trade Book</h2>
+          <div class="table-wrap import-table">
+            <table class="sortable-table">
+              <thead><tr><th>Date</th><th>Symbol</th><th>Side</th><th>Product</th><th>Qty</th><th>Price</th><th>Value</th><th>Margin</th><th>MTF Loan</th><th>Order ID</th><th></th></tr></thead>
+              <tbody id="dhanTradesBody"><tr><td colspan="11">Load Dhan trades to import executed orders.</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="panel">
+          <h2>Dhan Broker Orders</h2>
+          <div class="table-wrap import-table">
+            <table class="sortable-table">
+              <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Product</th><th>Qty</th><th>Price</th><th>Status</th><th>Broker ID</th><th>Message</th></tr></thead>
+              <tbody id="dhanOrdersBody"><tr><td colspan="9">Load Dhan to view broker orders.</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="logsTab" class="tab-panel">
+        <section class="panel">
+          <div class="panel-head"><h2>Backend Logs</h2><button id="refreshLogs" type="button">Refresh Logs</button></div>
+          <form id="logsForm" class="toolbar logs-toolbar">
+            <label class="check-label"><input id="logsEnabled" type="checkbox"> Enable logs</label>
+            <label>Level<select id="logLevel"><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option></select></label>
+            <button class="primary" type="submit">Save Logs</button>
+          </form>
+          <pre id="logsOutput" class="result-box logs-box"></pre>
+        </section>
       </section>
     </main>
 
     <script>
       window.ETF_UNIVERSE = {{ etf_universe | tojson }};
+      window.BROKER_CODES = {{ broker_codes | tojson }};
     </script>
-    <script src="{{ url_for('static', filename='app.js') }}?v=20260511-icici-import"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=20260514-prod-tabs"></script>
   </body>
 </html>
