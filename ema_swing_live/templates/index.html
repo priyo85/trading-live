@@ -24,6 +24,7 @@
         <button class="tab" type="button" data-tab="brokerLogin">Broker Login</button>
         <button class="tab" type="button" data-tab="iciciTab">ICICI</button>
         <button class="tab" type="button" data-tab="dhanTab">Dhan</button>
+        <button class="tab" type="button" data-tab="syncTab">Sync</button>
         <button class="tab" type="button" data-tab="logsTab">Logs</button>
       </nav>
 
@@ -274,12 +275,25 @@
           <pre id="logsOutput" class="result-box logs-box"></pre>
         </section>
       </section>
+
+      <section id="syncTab" class="tab-panel">
+        <section class="panel">
+          <div class="panel-head"><h2>EC2 Sync</h2><span id="syncStatus" class="soft-status"></span></div>
+          <form id="syncForm" class="sync-grid">
+            <label>EC2 URL<input id="syncRemoteUrl" placeholder="http://13.205.114.241"></label>
+            <label>Sync token<input id="syncToken" type="password" autocomplete="off"></label>
+            <button class="primary" type="submit">Pull EC2 Data</button>
+          </form>
+          <p class="hint">Pull copies non-secret strategy config, holdings, report, and broker order log from EC2 into this local instance. Broker credentials stay on EC2.</p>
+          <pre id="syncResult" class="result-box compact-result"></pre>
+        </section>
+      </section>
     </main>
 
     <script>
       window.ETF_UNIVERSE = {{ etf_universe | tojson }};
       window.BROKER_CODES = {{ broker_codes | tojson }};
     </script>
-    <script src="{{ url_for('static', filename='app.js') }}?v=20260514-prod-tabs"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=20260514-sync"></script>
   </body>
 </html>

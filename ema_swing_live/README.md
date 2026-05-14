@@ -187,3 +187,32 @@ This means:
 - EC2 app can run broker fetches and order placement
 - broker snapshots are stored locally on whichever instance fetched them
 - later sync can be added explicitly instead of relying on a shared internet-facing database
+
+## Local to EC2 Sync
+
+Local and EC2 intentionally keep separate databases. To copy EC2 strategy state into your local app, configure a shared sync token.
+
+On EC2 `.env`:
+
+```bash
+EMA_SWING_SYNC_TOKEN=<long-random-token>
+```
+
+On local PowerShell before starting the app:
+
+```powershell
+$env:EMA_SWING_REMOTE_URL="http://13.205.114.241"
+$env:EMA_SWING_SYNC_TOKEN="<same-long-random-token>"
+```
+
+Then open the `Sync` tab locally and click `Pull EC2 Data`.
+
+Sync copies only non-secret data:
+
+- strategy config
+- strategy holdings/trades/cash state
+- latest signal report
+- broker order log
+- app settings
+
+It does not copy ICICI/Dhan API credentials or session tokens.

@@ -11,6 +11,7 @@ const state = {
   dhanTradeRows: [],
   dhanOrderRows: [],
   logSettings: {},
+  sync: {},
 };
 
 const $ = (id) => document.getElementById(id);
@@ -59,6 +60,7 @@ function renderStatus(payload) {
   state.liveState = payload.live_state || {};
   state.brokerOrders = payload.broker_orders || [];
   state.logSettings = payload.log_settings || {};
+  state.sync = payload.sync || {};
   $("dataProvider").value = state.settings.data_provider || "auto";
   renderConfig(state.config || {});
   renderReport(state.report);
@@ -67,6 +69,7 @@ function renderStatus(payload) {
   renderBrokerOrders();
   renderLedger();
   renderLogSettings();
+  renderSyncStatus();
   checkIciciConnection();
   defaultDates();
 }
@@ -95,6 +98,17 @@ function renderDhan(credentials) {
   badge.classList.toggle("bad", !credentials.configured);
   badge.textContent = credentials.configured ? "Configured" : "Not configured";
   badge.title = credentials.path || "";
+}
+
+function renderSyncStatus() {
+  const status = $("syncStatus");
+  if (!status) return;
+  if ($("syncRemoteUrl") && state.sync.remote_url && !$("syncRemoteUrl").value) {
+    $("syncRemoteUrl").value = state.sync.remote_url;
+  }
+  status.textContent = state.sync.remote_configured
+    ? `Configured: ${state.sync.remote_url || "remote"}`
+    : "Optional local to EC2 pull";
 }
 
 function defaultDates() {
@@ -985,6 +999,32 @@ async function load() {
   renderStatus(payload);
 }
 
+async function pullSync(event) {
+  event.preventDefault();
+  setMessage("Pulling EC2 data...");
+  $("syncResult").textContent = "Sync in progress...";
+  const payload = await api("/api/sync/pull", {
+    method: "POST",
+    body: JSON.stringify({
+      remote_url: $("syncRemoteUrl")?.value || "",
+      token: $("syncToken")?.value || "",
+    }),
+  });
+  state.settings = payload.settings || state.settings;
+  state.config = payload.live_config || state.config;
+  state.liveState = payload.live_state || state.liveState;
+  state.report = payload.report || state.report;
+  state.brokerOrders = payload.broker_orders || state.brokerOrders;
+  state.sync = payload.status || state.sync;
+  renderConfig(state.config || {});
+  renderReport(state.report);
+  renderBrokerOrders();
+  renderLedger();
+  renderSyncStatus();
+  $("syncResult").textContent = JSON.stringify({ applied: payload.applied, exported_at: payload.exported_at }, null, 2);
+  setMessage("EC2 data pulled into this local instance.");
+}
+
 on("runSignals", "click", async () => {
   setMessage("Running live signals...");
   try {
@@ -1292,6 +1332,13 @@ on("logsForm", "submit", async (event) => {
   renderLogSettings();
   await refreshLogs();
   setMessage("Log settings saved.");
+});
+
+on("syncForm", "submit", (event) => {
+  pullSync(event).catch((error) => {
+    $("syncResult").textContent = error.message;
+    setMessage(error.message, true);
+  });
 });
 
 setMessage("Dashboard ready.");

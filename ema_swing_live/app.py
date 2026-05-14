@@ -10,6 +10,8 @@ from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urljoin
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
@@ -17,7 +19,7 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 from backtesting.etf_backtester.config.etf_universe import ETF_UNIVERSE
 from backtesting.etf_backtester.data.icici_breeze import load_icici_symbol_aliases
 from backtesting.etf_backtester.live.signal_runner import LIVE_CONFIG_PATH, _apply_actions, clear_live_ledger, run_live_signals
-from backtesting.etf_backtester.live.state import LIVE_REPORT_PATH, LIVE_STATE_PATH, load_live_state, reconcile_strategy_cash, save_live_state
+from backtesting.etf_backtester.live.state import LIVE_REPORT_PATH, LIVE_STATE_PATH, load_live_state, reconcile_strategy_cash, save_live_report, save_live_state
 from ema_swing_live import database, dhan, icici
 from ema_swing_live.storage import INSTANCE_DIR, load_json, load_settings, save_json, save_settings
 
@@ -75,12 +77,34 @@ def create_app() -> Flask:
                 "dhan": dhan.credentials_status(),
                 "log_settings": _load_log_settings(),
                 "storage": {"database_path": str(database.DB_PATH), "mode": "sqlite_mirror"},
+                "sync": _sync_status(),
                 "live_config": _load_live_config(),
                 "live_state": _load_live_state(),
                 "broker_orders": _load_broker_orders(),
                 "report": _load_latest_report(),
             }
         )
+
+    @app.get("/api/sync/export")
+    def api_sync_export():
+        if not _is_logged_in() and not _valid_sync_token():
+            return jsonify({"error": "Sync token required."}), 403
+        return jsonify(_sync_export_payload())
+
+    @app.post("/api/sync/pull")
+    @_login_required
+    def api_sync_pull():
+        payload = request.get_json(silent=True) or {}
+        remote_url = str(payload.get("remote_url") or os.getenv("EMA_SWING_REMOTE_URL", "")).strip()
+        token = str(payload.get("token") or os.getenv("EMA_SWING_SYNC_TOKEN", "")).strip()
+        if not remote_url:
+            return jsonify({"error": "Remote EC2 URL is required."}), 400
+        try:
+            remote_payload = _fetch_remote_sync(remote_url, token)
+            applied = _apply_sync_payload(remote_payload)
+        except Exception as exc:
+            return jsonify({"error": f"Sync pull failed: {exc}"}), 500
+        return jsonify({"applied": applied, "status": _sync_status(), **_sync_export_payload()})
 
     @app.get("/api/live/config")
     @_login_required
@@ -696,6 +720,87 @@ def _load_latest_report() -> dict[str, Any] | None:
     if not isinstance(report, dict):
         raise ValueError(f"Expected live report object in {LIVE_REPORT_PATH}")
     return report
+
+
+def _sync_status() -> dict[str, Any]:
+    remote_url = os.getenv("EMA_SWING_REMOTE_URL", "").strip()
+    token = os.getenv("EMA_SWING_SYNC_TOKEN", "").strip()
+    return {
+        "remote_url": remote_url,
+        "remote_configured": bool(remote_url),
+        "token_configured": bool(token),
+        "export_token_required": bool(token),
+    }
+
+
+def _sync_export_payload() -> dict[str, Any]:
+    return {
+        "exported_at": datetime.now().isoformat(timespec="seconds"),
+        "settings": load_settings(),
+        "live_config": _load_live_config(),
+        "live_state": _load_live_state(),
+        "report": _load_latest_report(),
+        "broker_orders": _load_broker_orders(),
+        "storage": {"database_path": str(database.DB_PATH), "mode": "sqlite_mirror"},
+    }
+
+
+def _fetch_remote_sync(remote_url: str, token: str) -> dict[str, Any]:
+    url = urljoin(remote_url.rstrip("/") + "/", "api/sync/export")
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["X-EMA-Swing-Sync-Token"] = token
+    request_obj = Request(url, headers=headers, method="GET")
+    with urlopen(request_obj, timeout=30) as response:
+        text = response.read().decode("utf-8")
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError("Remote sync response was not a JSON object.")
+    if data.get("error"):
+        raise ValueError(str(data["error"]))
+    return data
+
+
+def _apply_sync_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    applied: dict[str, Any] = {}
+    settings = payload.get("settings")
+    if isinstance(settings, dict):
+        save_settings(settings)
+        applied["settings"] = True
+
+    config = payload.get("live_config")
+    if isinstance(config, dict):
+        save_json(LIVE_CONFIG_PATH, config)
+        applied["live_config"] = True
+
+    live_state = payload.get("live_state")
+    if isinstance(live_state, dict):
+        save_live_state(live_state, LIVE_STATE_PATH)
+        applied["live_state"] = True
+
+    report = payload.get("report")
+    if isinstance(report, dict):
+        save_live_report(report, LIVE_REPORT_PATH)
+        applied["report"] = True
+
+    broker_orders = payload.get("broker_orders")
+    if isinstance(broker_orders, list):
+        _save_broker_orders([row for row in broker_orders if isinstance(row, dict)])
+        applied["broker_orders"] = True
+
+    database.append_audit(
+        "pull",
+        "sync",
+        str(payload.get("exported_at", "")),
+        {"remote_exported_at": payload.get("exported_at"), "applied": applied},
+    )
+    return applied
+
+
+def _valid_sync_token() -> bool:
+    expected = os.getenv("EMA_SWING_SYNC_TOKEN", "").strip()
+    supplied = str(request.headers.get("X-EMA-Swing-Sync-Token", "")).strip()
+    return bool(expected and supplied and secrets.compare_digest(expected, supplied))
 
 
 def _load_live_state() -> dict[str, Any]:
