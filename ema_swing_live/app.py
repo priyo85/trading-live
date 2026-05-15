@@ -1460,6 +1460,8 @@ def _apply_provider_environment(provider: str) -> None:
         normalized = "none"
     if normalized == "icici":
         icici.seed_environment()
+    if normalized in {"auto", "dhan", "dhanhq"}:
+        dhan.seed_environment()
     if normalized in {"auto", "dhan", "dhanhq", "icici", "none"}:
         os.environ["ETF_DATA_PROVIDER"] = normalized
 

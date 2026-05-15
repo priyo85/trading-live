@@ -9,6 +9,8 @@ from typing import Iterable
 
 from backtesting.etf_backtester.config.etf_universe import ETF_UNIVERSE
 from backtesting.etf_backtester.data.icici_breeze import PROVIDER_NAME, create_provider_from_env
+from backtesting.etf_backtester.data.nse_equity import PROVIDER_NAME as NSE_EQUITY_PROVIDER_NAME
+from backtesting.etf_backtester.data.nse_equity import fetch_historical_prices as fetch_nse_historical_prices
 from backtesting.etf_backtester.data.sqlite_cache import CandleCache
 from backtesting.etf_backtester.data.yahoo_finance import (
     HistoryAvailability,
@@ -77,14 +79,21 @@ def fetch_historical_prices(
     """Fetch OHLCV history from ICICI Breeze when configured, then Yahoo/NSE fallback."""
 
     symbol_list = list(symbols)
-    if price_time is None and _use_dhan_history():
-        dhan_histories, fallback_symbols = _fetch_dhan_historical_prices(symbol_list, start_date, end_date)
-        if not fallback_symbols:
-            return dhan_histories
-        fallback_histories = _fetch_non_dhan_historical_prices(fallback_symbols, start_date, end_date, price_time, intraday_interval)
-        return {**dhan_histories, **fallback_histories}
+    histories: dict[str, list[dict]] = {}
+    fallback_symbols = symbol_list
 
-    return _fetch_non_dhan_historical_prices(symbol_list, start_date, end_date, price_time, intraday_interval)
+    if price_time is None and _use_nse_equity_history():
+        nse_histories, fallback_symbols = _fetch_nse_equity_historical_prices(symbol_list, start_date, end_date)
+        histories.update(nse_histories)
+
+    if price_time is None and fallback_symbols and _use_dhan_history():
+        dhan_histories, fallback_symbols = _fetch_dhan_historical_prices(fallback_symbols, start_date, end_date)
+        histories.update(dhan_histories)
+
+    if fallback_symbols:
+        histories.update(_fetch_non_dhan_historical_prices(fallback_symbols, start_date, end_date, price_time, intraday_interval))
+
+    return histories
 
 
 def _fetch_non_dhan_historical_prices(
@@ -153,6 +162,47 @@ def _fetch_dhan_historical_prices(
     fallback_symbols: list[str] = []
     for source_symbol in symbols:
         rows = cache.rows(DHAN_PROVIDER_NAME, source_symbol, timeframe, start_date, end_date)
+        if rows:
+            histories[source_symbol] = rows
+        else:
+            fallback_symbols.append(source_symbol)
+    return histories, fallback_symbols
+
+
+def _fetch_nse_equity_historical_prices(
+    symbols: list[str],
+    start_date: date,
+    end_date: date,
+) -> tuple[dict[str, list[dict]], list[str]]:
+    cache = CandleCache()
+    histories: dict[str, list[dict]] = {}
+    fetches_by_range: dict[tuple[date, date], list[str]] = {}
+    timeframe = "daily_close"
+    fetch_end_date = _latest_fetchable_daily_date(end_date)
+    for source_symbol in symbols:
+        missing_ranges = cache.missing_ranges(NSE_EQUITY_PROVIDER_NAME, source_symbol, timeframe, start_date, fetch_end_date)
+        for missing_start, missing_end in missing_ranges:
+            fetches_by_range.setdefault((missing_start, missing_end), []).append(source_symbol)
+
+    fetches = [(range_start, range_end, range_symbols) for (range_start, range_end), range_symbols in fetches_by_range.items()]
+    if fetches:
+        with ThreadPoolExecutor(max_workers=_nse_equity_history_workers(len(fetches))) as executor:
+            results = executor.map(
+                lambda item: (*item, fetch_nse_historical_prices(item[2], item[0], item[1])),
+                fetches,
+            )
+        for missing_start, missing_end, range_symbols, (fetched, fallback) in results:
+            for source_symbol in range_symbols:
+                rows = fetched.get(source_symbol, [])
+                if rows:
+                    cache.save_rows(NSE_EQUITY_PROVIDER_NAME, source_symbol, timeframe, rows)
+                    cache.mark_attempted(NSE_EQUITY_PROVIDER_NAME, source_symbol, timeframe, missing_start, missing_end)
+                elif source_symbol not in fallback:
+                    cache.mark_attempted(NSE_EQUITY_PROVIDER_NAME, source_symbol, timeframe, missing_start, missing_end)
+
+    fallback_symbols: list[str] = []
+    for source_symbol in symbols:
+        rows = cache.rows(NSE_EQUITY_PROVIDER_NAME, source_symbol, timeframe, start_date, end_date)
         if rows:
             histories[source_symbol] = rows
         else:
@@ -271,9 +321,27 @@ def _use_dhan_history() -> bool:
     return not disabled and provider in {"auto", "dhan", "dhanhq"}
 
 
+def _use_nse_equity_history() -> bool:
+    provider = (
+        os.getenv("ETF_HISTORY_PROVIDER")
+        or os.getenv("ETF_DATA_PROVIDER")
+        or "auto"
+    ).strip().lower()
+    disabled = os.getenv("ETF_NSE_HISTORY_ENABLED", "1").strip().lower() in {"0", "false", "no", "off"}
+    return not disabled and provider in {"auto", "nse", "nse_equity", "dhan", "dhanhq", "icici", "none", "yahoo", "yfinance"}
+
+
 def _dhan_history_workers(fetch_count: int) -> int:
     try:
         configured = int(os.getenv("ETF_DHAN_HISTORY_WORKERS", "3"))
+    except ValueError:
+        configured = 3
+    return max(1, min(configured, fetch_count))
+
+
+def _nse_equity_history_workers(fetch_count: int) -> int:
+    try:
+        configured = int(os.getenv("ETF_NSE_HISTORY_WORKERS", "3"))
     except ValueError:
         configured = 3
     return max(1, min(configured, fetch_count))

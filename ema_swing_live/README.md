@@ -240,7 +240,20 @@ Dhan CMP uses the bulk LTP endpoint first. The slower holdings snapshot fallback
 $env:DHAN_LTP_HOLDINGS_FALLBACK="1"
 ```
 
-When data provider is `Auto` or `Dhan`, daily ETF history is fetched from Dhan where a Dhan security ID is available, then cached in SQLite. This keeps the live CMP and the live 9 EMA on the same broker/NSE feed instead of mixing Dhan CMP with Yahoo daily candles. Disable this fallback if needed:
+Daily ETF history is fetched from NSE's equity archive first, then cached in SQLite. This avoids depending on ICICI/Dhan for ETF daily candles and keeps the 9 EMA closer to the exchange candles you see on charting sites. Dhan daily history is still used as a fallback when NSE does not return a symbol.
+
+```powershell
+$env:ETF_NSE_HISTORY_ENABLED="1"
+$env:ETF_NSE_HISTORY_WORKERS="3"
+```
+
+Disable the NSE daily archive fallback only if needed:
+
+```powershell
+$env:ETF_NSE_HISTORY_ENABLED="0"
+```
+
+Dhan history fallback can also be tuned:
 
 ```powershell
 $env:ETF_DHAN_HISTORY_ENABLED="0"
