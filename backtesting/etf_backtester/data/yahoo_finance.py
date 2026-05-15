@@ -61,23 +61,26 @@ def fetch_current_prices(symbols: Iterable[str] = ETF_UNIVERSE) -> list[PriceQuo
     """Fetch current or latest available prices from Yahoo Finance."""
 
     yf = _try_import_yfinance()
-    quotes: list[PriceQuote] = []
+    symbol_list = list(symbols)
 
-    for source_symbol in symbols:
+    def fetch_one(source_symbol: str) -> PriceQuote:
         yahoo_symbol = to_yahoo_symbol(source_symbol)
         try:
-            quotes.append(_fetch_quote(source_symbol, yahoo_symbol, yf))
+            return _fetch_quote(source_symbol, yahoo_symbol, yf)
         except Exception as exc:
             alternate_symbol = _alternate_live_yahoo_symbol(source_symbol, yahoo_symbol)
             if alternate_symbol:
                 try:
-                    quotes.append(_fetch_quote(source_symbol, alternate_symbol, yf))
-                    continue
+                    return _fetch_quote(source_symbol, alternate_symbol, yf)
                 except Exception as alternate_exc:
                     exc = RuntimeError(f"{exc}; alternate {alternate_symbol} failed: {alternate_exc}")
-            quotes.append(PriceQuote(source_symbol=source_symbol, yahoo_symbol=yahoo_symbol, price=None, error=str(exc)))
+            return PriceQuote(source_symbol=source_symbol, yahoo_symbol=yahoo_symbol, price=None, error=str(exc))
 
-    return quotes
+    if len(symbol_list) <= 1:
+        return [fetch_one(symbol) for symbol in symbol_list]
+
+    with ThreadPoolExecutor(max_workers=_quote_fetch_workers(len(symbol_list))) as executor:
+        return list(executor.map(fetch_one, symbol_list))
 
 
 def fetch_history_availability(symbols: Iterable[str]) -> dict[str, HistoryAvailability]:
@@ -283,6 +286,14 @@ def _latest_fetchable_daily_date(value: date) -> date:
 def _history_fetch_workers(symbol_count: int) -> int:
     try:
         configured = int(os.getenv("ETF_HISTORY_FETCH_WORKERS", "8"))
+    except ValueError:
+        configured = 8
+    return max(1, min(configured, symbol_count))
+
+
+def _quote_fetch_workers(symbol_count: int) -> int:
+    try:
+        configured = int(os.getenv("ETF_QUOTE_FETCH_WORKERS", "8"))
     except ValueError:
         configured = 8
     return max(1, min(configured, symbol_count))

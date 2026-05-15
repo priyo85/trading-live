@@ -224,6 +224,22 @@ With this mode:
 
 For internet use, put HTTPS in front of EC2 before sending broker credentials over the gateway. A temporary SSH tunnel is also safer than plain HTTP.
 
+## Live Run Performance
+
+`Run Signals` displays timing chips after each run so slow phases are visible. History should normally come from SQLite cache after the first warm-up run. CMP quote speed can be tuned with:
+
+```powershell
+$env:ETF_CMP_CACHE_TTL_SECONDS="60"
+$env:ETF_QUOTE_FETCH_WORKERS="8"
+$env:ETF_HISTORY_FETCH_WORKERS="8"
+```
+
+Dhan CMP uses the bulk LTP endpoint first. The slower holdings snapshot fallback is off by default; enable it only if you need holdings prices when marketfeed fails:
+
+```powershell
+$env:DHAN_LTP_HOLDINGS_FALLBACK="1"
+```
+
 ## Local to EC2 Sync
 
 Local and EC2 intentionally keep separate databases. To copy EC2 strategy state into your local app, configure a shared sync token.

@@ -21,17 +21,26 @@ from backtesting.etf_backtester.data.yahoo_finance import (
 from backtesting.market_data.dhanhq import fetch_dhan_current_prices
 
 
+_QUOTE_CACHE: dict[str, tuple[datetime, PriceQuote]] = {}
+
+
 def fetch_current_prices(symbols: Iterable[str] = ETF_UNIVERSE) -> list[PriceQuote]:
     """Fetch quotes from DhanHQ/ICICI/Yahoo, depending on local configuration."""
 
     symbol_list = list(symbols)
-    if _use_dhan_live_quotes():
-        dhan_quotes, fallback_symbols = fetch_dhan_current_prices(symbol_list, PriceQuote)
-        if not fallback_symbols:
-            return dhan_quotes
-        return dhan_quotes + _fetch_non_dhan_current_prices(fallback_symbols)
+    cached_quotes, missing_symbols = _cached_current_quotes(symbol_list)
+    if not missing_symbols:
+        return cached_quotes
 
-    return _fetch_non_dhan_current_prices(symbol_list)
+    if _use_dhan_live_quotes():
+        dhan_quotes, fallback_symbols = fetch_dhan_current_prices(missing_symbols, PriceQuote)
+        fetched_quotes = dhan_quotes if not fallback_symbols else dhan_quotes + _fetch_non_dhan_current_prices(fallback_symbols)
+    else:
+        fetched_quotes = _fetch_non_dhan_current_prices(missing_symbols)
+
+    _store_current_quotes(fetched_quotes)
+    quotes_by_symbol = {quote.source_symbol: quote for quote in [*cached_quotes, *fetched_quotes]}
+    return [quotes_by_symbol[symbol] for symbol in symbol_list if symbol in quotes_by_symbol]
 
 
 def _fetch_non_dhan_current_prices(symbols: Iterable[str]) -> list[PriceQuote]:
@@ -200,6 +209,45 @@ def _timeframe_key(price_time: time | None, intraday_interval: str) -> str:
     if price_time is None:
         return "daily_close"
     return f"{intraday_interval}_{price_time.isoformat(timespec='minutes')}"
+
+
+def _cached_current_quotes(symbols: list[str]) -> tuple[list[PriceQuote], list[str]]:
+    ttl = _current_quote_cache_ttl_seconds()
+    if ttl <= 0:
+        return [], symbols
+    now = datetime.now()
+    cached: list[PriceQuote] = []
+    missing: list[str] = []
+    for symbol in symbols:
+        entry = _QUOTE_CACHE.get(symbol)
+        if entry is None:
+            missing.append(symbol)
+            continue
+        fetched_at, quote = entry
+        if (now - fetched_at).total_seconds() <= ttl:
+            cached.append(quote)
+        else:
+            _QUOTE_CACHE.pop(symbol, None)
+            missing.append(symbol)
+    if cached:
+        print(f"[CMP Cache] using {len(cached)}/{len(symbols)} cached quotes.")
+    return cached, missing
+
+
+def _store_current_quotes(quotes: list[PriceQuote]) -> None:
+    if _current_quote_cache_ttl_seconds() <= 0:
+        return
+    now = datetime.now()
+    for quote in quotes:
+        if quote.price is not None:
+            _QUOTE_CACHE[quote.source_symbol] = (now, quote)
+
+
+def _current_quote_cache_ttl_seconds() -> int:
+    try:
+        return max(0, int(os.getenv("ETF_CMP_CACHE_TTL_SECONDS", "60")))
+    except ValueError:
+        return 60
 
 
 def _latest_fetchable_daily_date(value: date) -> date:

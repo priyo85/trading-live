@@ -66,23 +66,23 @@ def fetch_dhan_current_prices(
     if not security_ids_by_symbol:
         return [], fallback_symbols
 
-    start = time.perf_counter()
     prices: dict[str, float] = {}
+    start = time.perf_counter()
     try:
-        prices.update(fetch_holdings_prices(credentials))
+        prices.update(fetch_ltp_batch(credentials, security_ids_by_symbol.values()))
     except Exception as exc:
-        print(f"[DhanHQ] holdings snapshot failed. {exc}")
+        print(f"[DhanHQ] market data quote failed; using fallback provider for uncovered symbols. {exc}")
 
     missing_security_ids = [
         security_id
         for source_symbol, security_id in security_ids_by_symbol.items()
         if str(security_id) not in prices and normalize_trading_symbol(source_symbol) not in prices
     ]
-    if missing_security_ids:
+    if missing_security_ids and _use_holdings_fallback():
         try:
-            prices.update(fetch_ltp_batch(credentials, missing_security_ids))
+            prices.update(fetch_holdings_prices(credentials))
         except Exception as exc:
-            print(f"[DhanHQ] market data quote failed; using fallback provider for uncovered symbols. {exc}")
+            print(f"[DhanHQ] holdings snapshot failed. {exc}")
 
     elapsed = time.perf_counter() - start
     quotes: list[QuoteT] = []
@@ -106,7 +106,12 @@ def fetch_dhan_current_prices(
 
     if quotes:
         print(f"[DhanHQ] fetched {len(quotes)}/{len(symbol_list)} live quotes in {elapsed:.2f}s.")
-    return quotes, fallback_symbols
+    return quotes, sorted(set(fallback_symbols))
+
+
+def _use_holdings_fallback() -> bool:
+    value = os.getenv("DHAN_LTP_HOLDINGS_FALLBACK", "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def fetch_ltp_batch(credentials: DhanCredentials, security_ids: Iterable[str]) -> dict[str, float]:
