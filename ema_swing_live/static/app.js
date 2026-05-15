@@ -161,9 +161,36 @@ function renderReport(report) {
   const holdingsCount = stateHoldingCount;
   $("kpiHoldings").textContent = holdingsCount || "-";
   $("kpiRun").textContent = report?.data_as_of ? `${report.run_date || "-"} / data ${report.data_as_of}` : (report?.run_date || "-");
+  renderTimings(report?.timings || {});
   renderActions(report?.actions || []);
   renderHoldings(report?.holdings || []);
   renderSignals(report?.signal_rows || []);
+}
+
+function renderTimings(timings) {
+  const target = $("runTimings");
+  if (!target) return;
+  const entries = Object.entries(timings || {}).filter(([, value]) => Number.isFinite(Number(value)));
+  if (!entries.length) {
+    target.classList.add("hidden");
+    target.innerHTML = "";
+    return;
+  }
+  const labels = {
+    load_config_state: "Load state",
+    history_fetch: "History",
+    intraday_overlay: "Intraday",
+    current_price_overlay: "CMP",
+    signal_generation: "Signals",
+    ath_history: "ATH",
+    action_report_build: "Report",
+    apply_actions: "Apply",
+    total_before_save: "Total",
+  };
+  target.innerHTML = entries.map(([key, value]) => (
+    `<span><strong>${labels[key] || key}</strong> ${Number(value).toFixed(2)}s</span>`
+  )).join("");
+  target.classList.remove("hidden");
 }
 
 function currentLedgerCash() {

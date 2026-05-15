@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Iterator
 
 from backtesting.etf_backtester.utils.paths import PACKAGE_ROOT
 
@@ -124,8 +126,27 @@ class CandleCache:
     def missing_ranges(self, provider: str, source_symbol: str, timeframe: str, start_date: date, end_date: date) -> list[tuple[date, date]]:
         return _missing_ranges(start_date, end_date, self.attempted_ranges(provider, source_symbol, timeframe))
 
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.path)
+    def get_metadata(self, key: str) -> str | None:
+        with self._connect() as connection:
+            cursor = connection.execute("SELECT value FROM metadata WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return str(row[0]) if row else None
+
+    def set_metadata(self, key: str, value: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        connection = sqlite3.connect(self.path, timeout=30)
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
 
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
@@ -156,6 +177,14 @@ class CandleCache:
                     start_date TEXT NOT NULL,
                     end_date TEXT NOT NULL,
                     PRIMARY KEY (provider, source_symbol, timeframe, start_date, end_date)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
                 )
                 """
             )

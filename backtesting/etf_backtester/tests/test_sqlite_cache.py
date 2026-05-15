@@ -32,3 +32,12 @@ def test_candle_cache_round_trips_rows(tmp_path):
     )
 
     assert cache.rows("provider", "NSE:TEST", "daily_close", date(2026, 1, 1), date(2026, 1, 1))[0]["close"] == 11.0
+
+
+def test_candle_cache_metadata_roundtrip(tmp_path):
+    cache = CandleCache(tmp_path / "market_data.sqlite")
+
+    cache.set_metadata("max_refresh:TEST", "empty")
+
+    assert cache.get_metadata("max_refresh:TEST") == "empty"
+    assert cache.get_metadata("missing") is None

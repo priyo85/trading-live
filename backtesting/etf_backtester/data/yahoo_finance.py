@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -143,21 +144,29 @@ def fetch_historical_prices(
         raise ValueError("start_date must be before or equal to end_date")
 
     yf = _try_import_yfinance()
-    histories: dict[str, list[dict]] = {}
+    symbol_list = list(symbols)
 
-    for source_symbol in symbols:
+    def fetch_one(source_symbol: str) -> tuple[str, list[dict]]:
         yahoo_symbol = to_yahoo_symbol(source_symbol)
-        histories[source_symbol] = _cached_history(
-            yf,
+        return (
             source_symbol,
-            yahoo_symbol,
-            start_date,
-            end_date,
-            price_time,
-            intraday_interval,
+            _cached_history(
+                yf,
+                source_symbol,
+                yahoo_symbol,
+                start_date,
+                end_date,
+                price_time,
+                intraday_interval,
+            ),
         )
 
-    return histories
+    if len(symbol_list) <= 1:
+        return dict(fetch_one(symbol) for symbol in symbol_list)
+
+    max_workers = _history_fetch_workers(len(symbol_list))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return dict(executor.map(fetch_one, symbol_list))
 
 
 def _fetch_quote(source_symbol: str, yahoo_symbol: str, yf) -> PriceQuote:
@@ -206,21 +215,22 @@ def _cached_history(
 ) -> list[dict]:
     cache = CandleCache()
     timeframe = _history_timeframe_key(price_time, intraday_interval)
-    missing_ranges = cache.missing_ranges(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, start_date, end_date)
+    fetch_end_date = _latest_fetchable_daily_date(end_date) if price_time is None else end_date
+    missing_ranges = cache.missing_ranges(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, start_date, fetch_end_date)
 
     if not missing_ranges:
         cached_rows = _rows_in_range(cache.rows(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, start_date, end_date), start_date, end_date)
         attempted_ranges = cache.attempted_ranges(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe)
         if not cached_rows and attempted_ranges:
-            print(f"[Cache] {source_symbol} -> {yahoo_symbol}: cached range is empty; retrying {start_date} to {end_date}.")
-            missing_ranges = [(start_date, end_date)]
-        elif _should_retry_stale_trailing_daily_rows(cached_rows, end_date, price_time):
+            print(f"[Cache] {source_symbol} -> {yahoo_symbol}: cached range is empty; retrying {start_date} to {fetch_end_date}.")
+            missing_ranges = [(start_date, fetch_end_date)]
+        elif _should_retry_stale_trailing_daily_rows(cached_rows, fetch_end_date, price_time):
             retry_start = cached_rows[-1]["date"] + timedelta(days=1)
             print(
                 f"[Cache] {source_symbol} -> {yahoo_symbol}: cached daily rows end at "
-                f"{cached_rows[-1]['date']}; retrying {retry_start} to {end_date}."
+                f"{cached_rows[-1]['date']}; retrying {retry_start} to {fetch_end_date}."
             )
-            missing_ranges = [(retry_start, end_date)]
+            missing_ranges = [(retry_start, fetch_end_date)] if retry_start <= fetch_end_date else []
         else:
             print(f"[SQLite Cache] {source_symbol} -> {yahoo_symbol}: using cached data for {start_date} to {end_date}.")
             return cached_rows
@@ -240,7 +250,9 @@ def _cached_history(
         if rows:
             row_dates = [row["date"] for row in rows if isinstance(row.get("date"), date)]
             if row_dates:
-                cache.mark_attempted(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, min(row_dates), max(row_dates))
+                cache.mark_attempted(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, missing_start, missing_end)
+        elif missing_end < date.today() or price_time is None:
+            cache.mark_attempted(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, missing_start, missing_end)
 
     return _rows_in_range(cache.rows(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, start_date, end_date), start_date, end_date)
 
@@ -257,8 +269,23 @@ def _should_retry_stale_trailing_daily_rows(
     if not isinstance(latest_date, date):
         return False
 
-    expected_date = _previous_weekday(end_date)
+    expected_date = _latest_fetchable_daily_date(end_date)
     return latest_date < expected_date
+
+
+def _latest_fetchable_daily_date(value: date) -> date:
+    expected = value
+    if expected == date.today() and datetime.now().time() < time(18, 0):
+        expected -= timedelta(days=1)
+    return _previous_weekday(expected)
+
+
+def _history_fetch_workers(symbol_count: int) -> int:
+    try:
+        configured = int(os.getenv("ETF_HISTORY_FETCH_WORKERS", "8"))
+    except ValueError:
+        configured = 8
+    return max(1, min(configured, symbol_count))
 
 
 def _previous_weekday(value: date) -> date:
@@ -636,6 +663,7 @@ def _cached_max_history(source_symbol: str, yahoo_symbol: str, yf) -> list[dict]
     rows = cache.rows(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, MAX_CACHE_START, MAX_CACHE_END)
     attempted_ranges = cache.attempted_ranges(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe)
     if attempted_ranges and rows and not _should_retry_sparse_max_history(source_symbol, rows):
+        rows = _refresh_cached_max_history(cache, yf, source_symbol, yahoo_symbol, rows, timeframe)
         print(f"[SQLite Cache] {source_symbol} -> {yahoo_symbol}: using cached max availability.")
         return rows
     if attempted_ranges and not rows:
@@ -668,6 +696,45 @@ def _cached_max_history(source_symbol: str, yahoo_symbol: str, yf) -> list[dict]
         cache.save_rows(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, rows)
         cache.mark_attempted(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, MAX_CACHE_START, MAX_CACHE_END)
     return rows
+
+
+def _refresh_cached_max_history(
+    cache: CandleCache,
+    yf,
+    source_symbol: str,
+    yahoo_symbol: str,
+    rows: list[dict],
+    timeframe: str,
+) -> list[dict]:
+    row_dates = [row["date"] for row in rows if isinstance(row.get("date"), date)]
+    if not row_dates:
+        return rows
+
+    latest_cached = max(row_dates)
+    latest_fetchable = _latest_fetchable_daily_date(date.today())
+    refresh_start = latest_cached + timedelta(days=1)
+    if refresh_start > latest_fetchable:
+        return rows
+    refresh_key = f"max_refresh:{YAHOO_PROVIDER_NAME}:{yahoo_symbol}:{latest_fetchable.isoformat()}"
+    if cache.get_metadata(refresh_key) == "empty":
+        return rows
+
+    print(f"[SQLite Cache] {source_symbol} -> {yahoo_symbol}: updating max cache {refresh_start} to {latest_fetchable}.")
+    fetched_rows = _fetch_uncached_history(
+        yf,
+        source_symbol,
+        yahoo_symbol,
+        refresh_start,
+        latest_fetchable,
+        price_time=None,
+        intraday_interval="5m",
+    )
+    if fetched_rows:
+        cache.save_rows(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, fetched_rows)
+    else:
+        cache.set_metadata(refresh_key, "empty")
+    cache.mark_attempted(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, refresh_start, latest_fetchable)
+    return cache.rows(YAHOO_PROVIDER_NAME, yahoo_symbol, timeframe, MAX_CACHE_START, MAX_CACHE_END)
 
 
 def _intraday_history(

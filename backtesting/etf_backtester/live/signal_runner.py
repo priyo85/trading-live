@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from math import floor
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from backtesting.etf_backtester.config.etf_universe import ETF_UNIVERSE
@@ -45,6 +46,10 @@ class LiveSignalRun:
     report_path: Path
 
 
+def _record_timing(timings: dict[str, float], name: str, started_at: float) -> None:
+    timings[name] = round(perf_counter() - started_at, 3)
+
+
 def clear_live_ledger(
     config_path: Path = LIVE_CONFIG_PATH,
     state_path: Path = LIVE_STATE_PATH,
@@ -75,6 +80,10 @@ def run_live_signals(
 ) -> LiveSignalRun:
     """Generate live buy/sell signals and optionally apply them to the ledger."""
 
+    overall_started = perf_counter()
+    timings: dict[str, float] = {}
+
+    phase_started = perf_counter()
     config = _load_live_config(config_path)
     explicit_run_date = run_date is not None
     run_day = run_date or date.today()
@@ -91,6 +100,7 @@ def run_live_signals(
     state = load_live_state(state_path, initial_capital=float(config["initial_capital"]))
     if reconcile_strategy_cash(state, float(config["initial_capital"])):
         save_live_state(state, state_path)
+    _record_timing(timings, "load_config_state", phase_started)
 
     history_price_time = price_time if strict_price_time and price_time is not None else None
     if strict_price_time and price_time is not None and not _can_request_intraday(run_day):
@@ -103,6 +113,7 @@ def run_live_signals(
 
     signal_sources = signal_sources_for(symbols) if config["signal_source_mode"] == "saved" else {symbol: symbol for symbol in symbols}
     external_sources = sorted({source for symbol, source in signal_sources.items() if source != symbol})
+    phase_started = perf_counter()
     etf_histories, external_histories = _fetch_live_histories(
         symbols=symbols,
         external_sources=external_sources,
@@ -111,12 +122,14 @@ def run_live_signals(
         price_time=history_price_time,
         intraday_interval=str(config["intraday_interval"]),
     )
+    _record_timing(timings, "history_fetch", phase_started)
     price_note = "Daily candle close"
     if price_time is not None:
         price_note = "Daily cached data; Yahoo intraday not requested for old dates or non-trading days"
     if strict_price_time and price_time is not None:
         price_note = f"Selected-time intraday rows at {price_time.isoformat(timespec='minutes')}"
     elif price_time is not None and _can_request_intraday(run_day):
+        phase_started = perf_counter()
         etf_intraday_symbols = _symbols_with_row_on_date(etf_histories, symbols, run_day)
         _overlay_latest_intraday_rows(
             histories=etf_histories,
@@ -134,10 +147,12 @@ def run_live_signals(
                 price_time=price_time,
                 intraday_interval=str(config["intraday_interval"]),
             )
+        _record_timing(timings, "intraday_overlay", phase_started)
         price_note = "Selected-time intraday when available; daily cached data for missing intraday rows"
     if strict_price_time and price_time is not None:
         _require_selected_time_rows(etf_histories, symbols, run_day, price_time)
     if use_current_price:
+        phase_started = perf_counter()
         _overlay_current_price_rows_for_live(
             etf_histories=etf_histories,
             symbols=symbols,
@@ -145,12 +160,15 @@ def run_live_signals(
             external_sources=external_sources,
             run_day=run_day,
         )
+        _record_timing(timings, "current_price_overlay", phase_started)
         price_note = "Current market price"
         price_time = None
 
     signal_histories = {**etf_histories, **external_histories}
     strategy = _strategy_from_config(config)
+    phase_started = perf_counter()
     signals_by_source = _generate_signals(strategy, signal_histories)
+    _record_timing(timings, "signal_generation", phase_started)
 
     latest_rows = {
         symbol: rows[-1]
@@ -170,19 +188,27 @@ def run_live_signals(
         _require_fresh_daily_close_rows(latest_rows, signal_contexts, _expected_latest_daily_close_date(run_day))
     latest_signals = {symbol: int(context["event"]) for symbol, context in signal_contexts.items()}
     ath_sources = sorted(set(signal_sources.values()))
+    phase_started = perf_counter()
     ath_histories = fetch_max_close_history(ath_sources)
+    _record_timing(timings, "ath_history", phase_started)
     ath_latest_rows = _latest_rows_by_symbol(signal_histories, ath_sources)
+    phase_started = perf_counter()
     actions = _build_actions(config, state, etf_histories, signal_sources, ath_histories, ath_latest_rows, latest_rows, latest_signals, signal_contexts, run_day)
     signal_rows = _build_signal_rows(symbols, signal_sources, ath_histories, ath_latest_rows, latest_rows, latest_signals, signal_contexts, actions, state)
     report = _build_report(config, state, latest_rows, latest_signals, signal_rows, actions, run_day, price_time, price_note, apply_actions=False)
+    _record_timing(timings, "action_report_build", phase_started)
 
     if apply_actions:
+        phase_started = perf_counter()
         actions_to_apply = _filter_selected_actions(actions, selected_action_ids)
         _apply_actions(state, actions_to_apply, config)
         signal_rows = _build_signal_rows(symbols, signal_sources, ath_histories, ath_latest_rows, latest_rows, latest_signals, signal_contexts, actions_to_apply, state)
         report = _build_report(config, state, latest_rows, latest_signals, signal_rows, actions_to_apply, run_day, price_time, price_note, apply_actions=True)
         save_live_state(state, state_path)
+        _record_timing(timings, "apply_actions", phase_started)
 
+    timings["total_before_save"] = round(perf_counter() - overall_started, 3)
+    report["timings"] = timings
     saved_report_path = save_live_report(report, report_path) if save_report else report_path
     return LiveSignalRun(report=report, state_path=state_path, report_path=saved_report_path)
 

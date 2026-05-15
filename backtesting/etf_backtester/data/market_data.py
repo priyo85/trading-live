@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Iterable
 
 from backtesting.etf_backtester.config.etf_universe import ETF_UNIVERSE
@@ -163,7 +163,8 @@ def _cached_provider_history(
     intraday_interval: str,
     timeframe: str,
 ) -> list[dict]:
-    for missing_start, missing_end in cache.missing_ranges(provider.name, source_symbol, timeframe, start_date, end_date):
+    fetch_end_date = _latest_fetchable_daily_date(end_date) if price_time is None else end_date
+    for missing_start, missing_end in cache.missing_ranges(provider.name, source_symbol, timeframe, start_date, fetch_end_date):
         print(f"[ICICI Breeze] {source_symbol}: fetching {missing_start} to {missing_end}.")
         rows = provider.historical_prices(source_symbol, missing_start, missing_end, price_time, intraday_interval)
         cache.save_rows(provider.name, source_symbol, timeframe, rows)
@@ -199,3 +200,12 @@ def _timeframe_key(price_time: time | None, intraday_interval: str) -> str:
     if price_time is None:
         return "daily_close"
     return f"{intraday_interval}_{price_time.isoformat(timespec='minutes')}"
+
+
+def _latest_fetchable_daily_date(value: date) -> date:
+    expected = value
+    if expected == date.today() and datetime.now().time() < time(18, 0):
+        expected -= timedelta(days=1)
+    while expected.weekday() >= 5:
+        expected -= timedelta(days=1)
+    return expected

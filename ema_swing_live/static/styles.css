@@ -314,6 +314,26 @@ label {
   flex-wrap: wrap;
 }
 
+.timing-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -2px 0 14px;
+}
+
+.timing-list span {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.timing-list strong {
+  color: var(--text);
+}
+
 .action-list {
   display: grid;
   gap: 10px;
