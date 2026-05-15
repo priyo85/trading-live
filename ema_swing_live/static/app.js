@@ -712,12 +712,13 @@ function ledgerRow(trade = {}) {
 }
 
 function renderSignals(rows) {
+  const sourceLabel = state.report?.signal_time === "CMP" ? "Live Px/EMA" : "Source Px/EMA";
   $("signalsBody").innerHTML = rows.length ? rows.map((row) => `
     <tr>
       <td>${escapeHtml(row.symbol)}</td>
       <td>${escapeHtml(row.signal_source || "")}</td>
       <td>${escapeHtml(row.signal_label || "")}</td>
-      <td>${escapeHtml(row.source_date || "")} ${money(row.source_price)} / ${money(row.source_ema)}</td>
+      <td><span class="cell-label">${sourceLabel}</span>${escapeHtml(row.source_date || "")} ${money(row.source_price)} / ${money(row.source_ema)}</td>
       <td>${money(row.price)}</td>
       <td>${escapeHtml(row.last_signal || "")} ${escapeHtml(row.last_signal_date || "")}</td>
       <td>${pct(row.ath_distance_pct)}</td>
@@ -731,7 +732,8 @@ function sourceSummary(row) {
   const source = row.signal_source ? ` | source ${row.signal_source}` : "";
   const sourceDate = row.source_date ? ` ${row.source_date}` : "";
   const sourceValues = row.source_price && row.source_ema ? ` ${money(row.source_price)}/${money(row.source_ema)}` : "";
-  return `${source}${sourceDate}${sourceValues}`;
+  const basis = state.report?.signal_time === "CMP" ? " live" : "";
+  return `${source}${sourceDate}${sourceValues}${basis}`;
 }
 
 function portfolioBuyDate(row) {

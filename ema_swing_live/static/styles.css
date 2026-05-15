@@ -544,6 +544,14 @@ tr:last-child td {
   border-bottom: 0;
 }
 
+.cell-label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
 .notice {
   border: 1px solid var(--line);
   border-radius: 8px;

@@ -11,7 +11,7 @@ from backtesting.etf_backtester.live.signal_runner import run_live_signals
 
 
 class LiveSignalRunnerTests(unittest.TestCase):
-    def test_cmp_mode_keeps_signal_ema_on_daily_series(self):
+    def test_cmp_mode_uses_live_price_for_signal_ema(self):
         symbol = "NSE:HNGSNGBEES"
         start = date(2026, 1, 1)
         rows = [
@@ -25,7 +25,10 @@ class LiveSignalRunnerTests(unittest.TestCase):
             }
             for index in range(10)
         ]
-        expected_ema = exponential_moving_average([float(row["close"]) for row in rows], 9)[-1]
+        expected_live_ema = exponential_moving_average(
+            [float(row["close"]) for row in [*rows[:-1], {**rows[-1], "close": 200.0}]],
+            9,
+        )[-1]
 
         def fake_history(symbols, start_date, end_date, price_time=None, intraday_interval="5m"):
             return {requested: list(rows) for requested in symbols}
@@ -71,9 +74,11 @@ class LiveSignalRunnerTests(unittest.TestCase):
                         )
 
         signal_row = run.report["signal_rows"][0]
-        self.assertEqual(signal_row["source_price"], rows[-1]["close"])
-        self.assertAlmostEqual(signal_row["source_ema"], expected_ema)
+        self.assertEqual(signal_row["source_price"], 200.0)
+        self.assertAlmostEqual(signal_row["source_ema"], expected_live_ema)
         self.assertEqual(signal_row["price"], 200.0)
+        self.assertEqual(run.report["signal_time"], "CMP")
+        self.assertEqual(run.report["price_note"], "Current market price live EMA")
 
 
 if __name__ == "__main__":
