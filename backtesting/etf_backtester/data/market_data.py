@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta
 from typing import Iterable
 
@@ -18,7 +19,8 @@ from backtesting.etf_backtester.data.yahoo_finance import (
     fetch_max_close_history as fetch_yahoo_max_close_history,
     format_price_table,
 )
-from backtesting.market_data.dhanhq import fetch_dhan_current_prices
+from backtesting.market_data.dhanhq import PROVIDER_NAME as DHAN_PROVIDER_NAME
+from backtesting.market_data.dhanhq import fetch_dhan_current_prices, fetch_historical_daily_prices
 
 
 _QUOTE_CACHE: dict[str, tuple[datetime, PriceQuote]] = {}
@@ -74,6 +76,24 @@ def fetch_historical_prices(
 ) -> dict[str, list[dict]]:
     """Fetch OHLCV history from ICICI Breeze when configured, then Yahoo/NSE fallback."""
 
+    symbol_list = list(symbols)
+    if price_time is None and _use_dhan_history():
+        dhan_histories, fallback_symbols = _fetch_dhan_historical_prices(symbol_list, start_date, end_date)
+        if not fallback_symbols:
+            return dhan_histories
+        fallback_histories = _fetch_non_dhan_historical_prices(fallback_symbols, start_date, end_date, price_time, intraday_interval)
+        return {**dhan_histories, **fallback_histories}
+
+    return _fetch_non_dhan_historical_prices(symbol_list, start_date, end_date, price_time, intraday_interval)
+
+
+def _fetch_non_dhan_historical_prices(
+    symbols: Iterable[str],
+    start_date: date,
+    end_date: date,
+    price_time: time | None = None,
+    intraday_interval: str = "5m",
+) -> dict[str, list[dict]]:
     provider = _icici_provider()
     if provider is None:
         return fetch_yahoo_historical_prices(symbols, start_date, end_date, price_time, intraday_interval)
@@ -103,6 +123,41 @@ def fetch_historical_prices(
     if fallback_symbols:
         histories.update(fetch_yahoo_historical_prices(fallback_symbols, start_date, end_date, price_time, intraday_interval))
     return histories
+
+
+def _fetch_dhan_historical_prices(
+    symbols: list[str],
+    start_date: date,
+    end_date: date,
+) -> tuple[dict[str, list[dict]], list[str]]:
+    cache = CandleCache()
+    histories: dict[str, list[dict]] = {}
+    fetches: list[tuple[str, date, date]] = []
+    timeframe = "daily_close"
+    fetch_end_date = _latest_fetchable_daily_date(end_date)
+    for source_symbol in symbols:
+        missing_ranges = cache.missing_ranges(DHAN_PROVIDER_NAME, source_symbol, timeframe, start_date, fetch_end_date)
+        fetches.extend((source_symbol, missing_start, missing_end) for missing_start, missing_end in missing_ranges)
+
+    if fetches:
+        with ThreadPoolExecutor(max_workers=_dhan_history_workers(len(fetches))) as executor:
+            results = executor.map(lambda item: (*item, fetch_historical_daily_prices([item[0]], item[1], item[2])), fetches)
+        for source_symbol, missing_start, missing_end, (fetched, fallback) in results:
+            rows = fetched.get(source_symbol, [])
+            if rows:
+                cache.save_rows(DHAN_PROVIDER_NAME, source_symbol, timeframe, rows)
+                cache.mark_attempted(DHAN_PROVIDER_NAME, source_symbol, timeframe, missing_start, missing_end)
+            elif source_symbol not in fallback:
+                cache.mark_attempted(DHAN_PROVIDER_NAME, source_symbol, timeframe, missing_start, missing_end)
+
+    fallback_symbols: list[str] = []
+    for source_symbol in symbols:
+        rows = cache.rows(DHAN_PROVIDER_NAME, source_symbol, timeframe, start_date, end_date)
+        if rows:
+            histories[source_symbol] = rows
+        else:
+            fallback_symbols.append(source_symbol)
+    return histories, fallback_symbols
 
 
 def fetch_max_close_history(symbols: Iterable[str]) -> dict[str, list[dict]]:
@@ -203,6 +258,25 @@ def _use_dhan_live_quotes() -> bool:
         or "auto"
     ).strip().lower()
     return provider in {"auto", "dhan", "dhanhq"}
+
+
+def _use_dhan_history() -> bool:
+    provider = (
+        os.getenv("SWING_LIVE_PRICE_PROVIDER")
+        or os.getenv("ETF_LIVE_PRICE_PROVIDER")
+        or os.getenv("ETF_DATA_PROVIDER")
+        or "auto"
+    ).strip().lower()
+    disabled = os.getenv("ETF_DHAN_HISTORY_ENABLED", "1").strip().lower() in {"0", "false", "no", "off"}
+    return not disabled and provider in {"auto", "dhan", "dhanhq"}
+
+
+def _dhan_history_workers(fetch_count: int) -> int:
+    try:
+        configured = int(os.getenv("ETF_DHAN_HISTORY_WORKERS", "3"))
+    except ValueError:
+        configured = 3
+    return max(1, min(configured, fetch_count))
 
 
 def _timeframe_key(price_time: time | None, intraday_interval: str) -> str:

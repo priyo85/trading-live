@@ -240,6 +240,13 @@ Dhan CMP uses the bulk LTP endpoint first. The slower holdings snapshot fallback
 $env:DHAN_LTP_HOLDINGS_FALLBACK="1"
 ```
 
+When data provider is `Auto` or `Dhan`, daily ETF history is fetched from Dhan where a Dhan security ID is available, then cached in SQLite. This keeps the live CMP and the live 9 EMA on the same broker/NSE feed instead of mixing Dhan CMP with Yahoo daily candles. Disable this fallback if needed:
+
+```powershell
+$env:ETF_DHAN_HISTORY_ENABLED="0"
+$env:ETF_DHAN_HISTORY_WORKERS="3"
+```
+
 ## Local to EC2 Sync
 
 Local and EC2 intentionally keep separate databases. To copy EC2 strategy state into your local app, configure a shared sync token.

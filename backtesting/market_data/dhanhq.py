@@ -14,7 +14,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Iterable, TypeVar
@@ -152,6 +152,111 @@ def fetch_ltp_batch(credentials: DhanCredentials, security_ids: Iterable[str]) -
             if isinstance(row, dict) and isinstance(row.get("last_price"), (int, float)):
                 prices[str(security_id)] = float(row["last_price"])
     return prices
+
+
+def fetch_historical_daily_prices(
+    symbols: Iterable[str],
+    start_date: date,
+    end_date: date,
+) -> tuple[dict[str, list[dict]], list[str]]:
+    """Fetch daily OHLCV rows from Dhan's historical chart API."""
+
+    credentials = load_credentials()
+    symbol_list = list(symbols)
+    if credentials is None:
+        return {}, symbol_list
+
+    security_map = load_security_id_map()
+    histories: dict[str, list[dict]] = {}
+    fallback_symbols: list[str] = []
+    for source_symbol in symbol_list:
+        trading_symbol = normalize_trading_symbol(source_symbol)
+        security_id = security_map.get(trading_symbol)
+        if not security_id:
+            fallback_symbols.append(source_symbol)
+            continue
+        try:
+            rows = fetch_historical_daily_by_security_id(credentials, security_id, start_date, end_date)
+        except Exception as exc:
+            print(f"[DhanHQ] {source_symbol}: historical daily failed; using fallback. {exc}")
+            fallback_symbols.append(source_symbol)
+            continue
+        if rows:
+            histories[source_symbol] = rows
+        else:
+            fallback_symbols.append(source_symbol)
+    return histories, fallback_symbols
+
+
+def fetch_historical_daily_by_security_id(
+    credentials: DhanCredentials,
+    security_id: str,
+    start_date: date,
+    end_date: date,
+) -> list[dict]:
+    """Fetch daily OHLCV rows for one Dhan security ID."""
+
+    if start_date > end_date:
+        return []
+
+    payload = json.dumps(
+        {
+            "securityId": str(security_id),
+            "exchangeSegment": "NSE_EQ",
+            "instrument": "EQUITY",
+            "expiryCode": 0,
+            "oi": False,
+            "fromDate": start_date.isoformat(),
+            # Dhan daily historical toDate is non-inclusive.
+            "toDate": (end_date + timedelta(days=1)).isoformat(),
+        }
+    ).encode("utf-8")
+    request = Request(
+        f"{BASE_URL}/charts/historical",
+        data=payload,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "access-token": credentials.access_token,
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"historical HTTP {exc.code}: {body[:200]}") from exc
+    except URLError as exc:
+        raise RuntimeError(str(exc.reason)) from exc
+
+    return _historical_rows_from_response(data)
+
+
+def _historical_rows_from_response(data: dict) -> list[dict]:
+    timestamps = data.get("timestamp") or []
+    opens = data.get("open") or []
+    highs = data.get("high") or []
+    lows = data.get("low") or []
+    closes = data.get("close") or []
+    volumes = data.get("volume") or []
+    rows: list[dict] = []
+    for index, timestamp in enumerate(timestamps):
+        try:
+            row_date = datetime.fromtimestamp(float(timestamp)).date()
+            rows.append(
+                {
+                    "date": row_date,
+                    "open": float(opens[index]),
+                    "high": float(highs[index]),
+                    "low": float(lows[index]),
+                    "close": float(closes[index]),
+                    "volume": float(volumes[index]) if index < len(volumes) else 0.0,
+                }
+            )
+        except (IndexError, TypeError, ValueError):
+            continue
+    return rows
 
 
 def fetch_holdings_prices(credentials: DhanCredentials) -> dict[str, float]:
