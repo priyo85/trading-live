@@ -184,9 +184,45 @@ Broker credentials are intentionally not mirrored into SQLite. Keep ICICI/Dhan c
 This means:
 
 - local app can run strategy signals, holdings, ledger, config, and reports without EC2
-- EC2 app can run broker fetches and order placement
+- EC2 app can run broker fetches and ICICI order placement through its static IP
 - broker snapshots are stored locally on whichever instance fetched them
-- later sync can be added explicitly instead of relying on a shared internet-facing database
+- sync/gateway are explicit instead of relying on a shared internet-facing database
+
+## Lightweight EC2 Broker Gateway
+
+For the lowest EC2 footprint, run the full dashboard locally and keep EC2 as a small broker gateway only. ICICI Breeze calls can be proxied through EC2 because ICICI needs the static IP. Dhan profile, funds, holdings, trades, and signals can run locally; Dhan order placement can be routed through the gateway later by enabling the Dhan order flag once implemented.
+
+On EC2 `.env`, set a long token and keep the broker credentials there:
+
+```bash
+EMA_SWING_BROKER_GATEWAY_TOKEN=<long-random-token>
+EMA_SWING_SYNC_TOKEN=<same-token-if-you-also-use-sync>
+ICICI_BREEZE_API_KEY=...
+ICICI_BREEZE_API_SECRET=...
+ICICI_BREEZE_SESSION_TOKEN=...
+```
+
+Do not set `EMA_SWING_BROKER_GATEWAY_URL` on EC2. Restart the EC2 service after editing `.env`:
+
+```bash
+sudo systemctl restart ema-swing-live
+```
+
+On your local PowerShell before starting the app:
+
+```powershell
+$env:EMA_SWING_BROKER_GATEWAY_URL="http://13.205.114.241"
+$env:EMA_SWING_BROKER_GATEWAY_TOKEN="<same-long-random-token>"
+python -m ema_swing_live.app
+```
+
+With this mode:
+
+- local strategy screens, signal generation, holdings, ledger, logs, config, and Dhan info continue to work even if EC2 is down
+- ICICI login/session, quote test, portfolio, trades, order book, order placement, cancel, and GTT helper calls go through EC2 when the gateway URL/token are configured
+- if EC2 is down, only those ICICI broker calls fail; local strategy state remains usable
+
+For internet use, put HTTPS in front of EC2 before sending broker credentials over the gateway. A temporary SSH tunnel is also safer than plain HTTP.
 
 ## Local to EC2 Sync
 

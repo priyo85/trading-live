@@ -20,7 +20,7 @@ from backtesting.etf_backtester.config.etf_universe import ETF_UNIVERSE
 from backtesting.etf_backtester.data.icici_breeze import load_icici_symbol_aliases
 from backtesting.etf_backtester.live.signal_runner import LIVE_CONFIG_PATH, _apply_actions, clear_live_ledger, run_live_signals
 from backtesting.etf_backtester.live.state import LIVE_REPORT_PATH, LIVE_STATE_PATH, load_live_state, reconcile_strategy_cash, save_live_report, save_live_state
-from ema_swing_live import database, dhan, icici
+from ema_swing_live import broker_gateway, database, dhan, icici
 from ema_swing_live.storage import INSTANCE_DIR, load_json, load_settings, save_json, save_settings
 
 
@@ -78,6 +78,7 @@ def create_app() -> Flask:
                 "log_settings": _load_log_settings(),
                 "storage": {"database_path": str(database.DB_PATH), "mode": "sqlite_mirror"},
                 "sync": _sync_status(),
+                "broker_gateway": broker_gateway.status(),
                 "live_config": _load_live_config(),
                 "live_state": _load_live_state(),
                 "broker_orders": _load_broker_orders(),
@@ -105,6 +106,22 @@ def create_app() -> Flask:
         except Exception as exc:
             return jsonify({"error": f"Sync pull failed: {exc}"}), 500
         return jsonify({"applied": applied, "status": _sync_status(), **_sync_export_payload()})
+
+    @app.post("/api/broker-gateway")
+    def api_broker_gateway():
+        if not _valid_broker_gateway_token():
+            return jsonify({"error": "Broker gateway token required."}), 403
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = _execute_broker_gateway_operation(
+                str(payload.get("operation", "")),
+                payload.get("params") if isinstance(payload.get("params"), dict) else {},
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"Broker gateway operation failed: {exc}"}), 500
+        return jsonify(result)
 
     @app.get("/api/live/config")
     @_login_required
@@ -235,6 +252,13 @@ def create_app() -> Flask:
     @app.get("/api/icici/status")
     @_login_required
     def api_icici_status():
+        if broker_gateway.icici_enabled():
+            try:
+                payload = broker_gateway.call("icici.credentials_status")
+                payload["gateway"] = broker_gateway.status()
+                return jsonify(payload)
+            except Exception as exc:
+                return jsonify({"credentials": {"configured": False}, "gateway": broker_gateway.status(), "error": str(exc)})
         return jsonify({"credentials": icici.credentials_status()})
 
     @app.post("/api/icici/login-url")
@@ -242,9 +266,18 @@ def create_app() -> Flask:
     def api_icici_login_url():
         payload = request.get_json(silent=True) or {}
         try:
+            if broker_gateway.icici_enabled():
+                return jsonify(
+                    broker_gateway.call(
+                        "icici.login_url",
+                        {"api_key": str(payload.get("api_key", ""))},
+                    )
+                )
             return jsonify({"url": icici.login_url(str(payload.get("api_key", "")))})
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            return jsonify({"error": f"ICICI login URL failed: {exc}"}), 500
 
     @app.post("/api/icici/session")
     @_login_required
@@ -254,6 +287,18 @@ def create_app() -> Flask:
             api_key = str(payload.get("api_key", "")).strip()
             api_secret = str(payload.get("api_secret", "")).strip()
             session_token = str(payload.get("session_token", "")).strip()
+            if broker_gateway.icici_enabled():
+                return jsonify(
+                    broker_gateway.call(
+                        "icici.session",
+                        {
+                            "api_key": api_key,
+                            "api_secret": api_secret,
+                            "session_token": session_token,
+                            "stock_code": str(payload.get("stock_code", "GOLDEX")),
+                        },
+                    )
+                )
             test = icici.test_session(
                 api_key=api_key,
                 api_secret=api_secret,
@@ -350,6 +395,17 @@ def create_app() -> Flask:
     def api_icici_save():
         payload = request.get_json(silent=True) or {}
         try:
+            if broker_gateway.icici_enabled():
+                return jsonify(
+                    broker_gateway.call(
+                        "icici.save",
+                        {
+                            "api_key": str(payload.get("api_key", "")),
+                            "api_secret": str(payload.get("api_secret", "")),
+                            "session_token": str(payload.get("session_token", "")),
+                        },
+                    )
+                )
             icici.save_credentials(
                 api_key=str(payload.get("api_key", "")),
                 api_secret=str(payload.get("api_secret", "")),
@@ -366,6 +422,13 @@ def create_app() -> Flask:
     def api_icici_test():
         payload = request.get_json(silent=True) or {}
         try:
+            if broker_gateway.icici_enabled():
+                return jsonify(
+                    broker_gateway.call(
+                        "icici.test_quote",
+                        {"stock_code": str(payload.get("stock_code", "GOLDEX"))},
+                    )
+                )
             test = icici.test_quote(str(payload.get("stock_code", "GOLDEX")))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
@@ -377,6 +440,20 @@ def create_app() -> Flask:
     @_login_required
     def api_icici_connection():
         stock_code = str(request.args.get("stock_code", "GOLDEX"))
+        if broker_gateway.icici_enabled():
+            try:
+                payload = broker_gateway.call("icici.connection", {"stock_code": stock_code})
+                payload["gateway"] = broker_gateway.status()
+                return jsonify(payload)
+            except Exception as exc:
+                return jsonify(
+                    {
+                        "connected": False,
+                        "error": str(exc),
+                        "credentials": {"configured": False},
+                        "gateway": broker_gateway.status(),
+                    }
+                )
         try:
             test = icici.test_quote(stock_code)
             connected = bool(test.get("ok"))
@@ -389,15 +466,27 @@ def create_app() -> Flask:
     def api_icici_limit_order():
         payload = request.get_json(silent=True) or {}
         try:
+            order_params = {
+                "symbol": str(payload.get("symbol", "")),
+                "side": str(payload.get("side", "")),
+                "quantity": payload.get("quantity", ""),
+                "limit_price": payload.get("limit_price", ""),
+                "dry_run": bool(payload.get("dry_run", True)),
+                "product": str(payload.get("product", "cash")),
+                "validity": str(payload.get("validity", "day")),
+                "user_remark": str(payload.get("user_remark", "")),
+            }
+            if broker_gateway.icici_enabled():
+                return jsonify(broker_gateway.call("icici.limit_order", order_params))
             order = icici.place_limit_order(
-                symbol=str(payload.get("symbol", "")),
-                side=str(payload.get("side", "")),
-                quantity=payload.get("quantity", ""),
-                limit_price=payload.get("limit_price", ""),
-                dry_run=bool(payload.get("dry_run", True)),
-                product=str(payload.get("product", "cash")),
-                validity=str(payload.get("validity", "day")),
-                user_remark=str(payload.get("user_remark", "")),
+                symbol=order_params["symbol"],
+                side=order_params["side"],
+                quantity=order_params["quantity"],
+                limit_price=order_params["limit_price"],
+                dry_run=order_params["dry_run"],
+                product=order_params["product"],
+                validity=order_params["validity"],
+                user_remark=order_params["user_remark"],
             )
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
@@ -417,16 +506,20 @@ def create_app() -> Flask:
                 product = "cash"
             quantity = payload.get("quantity", report_action.get("shares", ""))
             price = payload.get("price", report_action.get("price", ""))
-            order = icici.place_limit_order(
-                symbol=str(report_action.get("symbol", "")),
-                side=str(report_action.get("side", "")),
-                quantity=quantity,
-                limit_price=price,
-                product=product,
-                dry_run=dry_run,
-                validity=str(payload.get("validity", "day")),
-                user_remark="emaswing",
-            )
+            order_params = {
+                "symbol": str(report_action.get("symbol", "")),
+                "side": str(report_action.get("side", "")),
+                "quantity": quantity,
+                "limit_price": price,
+                "product": product,
+                "dry_run": dry_run,
+                "validity": str(payload.get("validity", "day")),
+                "user_remark": "emaswing",
+            }
+            if broker_gateway.icici_enabled():
+                order = broker_gateway.call("icici.limit_order", order_params).get("order", {})
+            else:
+                order = icici.place_limit_order(**order_params)
             entry = _record_broker_order(report_action, order, product=product, quantity=quantity, price=price)
             booked_state = None
             if order.get("ok") and not dry_run and bool(payload.get("book_on_success", True)):
@@ -459,11 +552,15 @@ def create_app() -> Flask:
     @_login_required
     def api_icici_order_book():
         try:
-            orders = icici.order_book(
-                exchange_code=str(request.args.get("exchange_code", "NSE")),
-                from_date=_optional_text(request.args.get("from_date")),
-                to_date=_optional_text(request.args.get("to_date")),
-            )
+            params = {
+                "exchange_code": str(request.args.get("exchange_code", "NSE")),
+                "from_date": _optional_text(request.args.get("from_date")),
+                "to_date": _optional_text(request.args.get("to_date")),
+            }
+            if broker_gateway.icici_enabled():
+                orders = broker_gateway.call("icici.order_book", params).get("orders", {})
+            else:
+                orders = icici.order_book(**params)
             _save_broker_snapshot("icici", "orders", {"orders": orders})
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
@@ -475,18 +572,22 @@ def create_app() -> Flask:
     @_login_required
     def api_icici_portfolio():
         try:
-            payload = {
-                "funds": icici.funds(),
-                "demat_holdings": icici.demat_holdings(),
-                "portfolio_holdings": icici.portfolio_holdings(
-                    exchange_code=str(request.args.get("exchange_code", "NSE")),
-                    from_date=_optional_text(request.args.get("from_date")),
-                    to_date=_optional_text(request.args.get("to_date")),
-                    stock_code=str(request.args.get("stock_code", "")),
-                    portfolio_type=str(request.args.get("portfolio_type", "")),
-                ),
-                "positions": icici.portfolio_positions(),
+            params = {
+                "exchange_code": str(request.args.get("exchange_code", "NSE")),
+                "from_date": _optional_text(request.args.get("from_date")),
+                "to_date": _optional_text(request.args.get("to_date")),
+                "stock_code": str(request.args.get("stock_code", "")),
+                "portfolio_type": str(request.args.get("portfolio_type", "")),
             }
+            if broker_gateway.icici_enabled():
+                payload = broker_gateway.call("icici.portfolio", params)
+            else:
+                payload = {
+                    "funds": icici.funds(),
+                    "demat_holdings": icici.demat_holdings(),
+                    "portfolio_holdings": icici.portfolio_holdings(**params),
+                    "positions": icici.portfolio_positions(),
+                }
             _save_broker_snapshot("icici", "portfolio", payload)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
@@ -498,14 +599,18 @@ def create_app() -> Flask:
     @_login_required
     def api_icici_trades():
         try:
-            trades = icici.trade_book(
-                exchange_code=str(request.args.get("exchange_code", "NSE")),
-                from_date=_optional_text(request.args.get("from_date")),
-                to_date=_optional_text(request.args.get("to_date")),
-                product_type=str(request.args.get("product_type", "")),
-                action=str(request.args.get("action", "")),
-                stock_code=str(request.args.get("stock_code", "")),
-            )
+            params = {
+                "exchange_code": str(request.args.get("exchange_code", "NSE")),
+                "from_date": _optional_text(request.args.get("from_date")),
+                "to_date": _optional_text(request.args.get("to_date")),
+                "product_type": str(request.args.get("product_type", "")),
+                "action": str(request.args.get("action", "")),
+                "stock_code": str(request.args.get("stock_code", "")),
+            }
+            if broker_gateway.icici_enabled():
+                trades = broker_gateway.call("icici.trades", params).get("trades", {})
+            else:
+                trades = icici.trade_book(**params)
             _save_broker_snapshot("icici", "trades", {"trades": trades})
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
@@ -559,7 +664,11 @@ def create_app() -> Flask:
         payload = request.get_json(silent=True) or {}
         try:
             order_id = str(payload.get("order_id", ""))
-            cancel = icici.cancel_order(exchange_code=str(payload.get("exchange_code", "NSE")), order_id=order_id)
+            params = {"exchange_code": str(payload.get("exchange_code", "NSE")), "order_id": order_id}
+            if broker_gateway.icici_enabled():
+                cancel = broker_gateway.call("icici.cancel_order", params).get("cancel", {})
+            else:
+                cancel = icici.cancel_order(**params)
             orders = _load_broker_orders()
             for order in orders:
                 if str(order.get("broker_order_id", "")) == order_id:
@@ -578,16 +687,20 @@ def create_app() -> Flask:
     def api_icici_gtt_single():
         payload = request.get_json(silent=True) or {}
         try:
-            order = icici.place_gtt_single_leg_order(
-                symbol=str(payload.get("symbol", "")),
-                side=str(payload.get("side", "")),
-                quantity=payload.get("quantity", ""),
-                trigger_price=payload.get("trigger_price", ""),
-                limit_price=payload.get("limit_price", ""),
-                dry_run=bool(payload.get("dry_run", True)),
-                expiry_date=_optional_text(payload.get("expiry_date")),
-                trade_date=_optional_text(payload.get("trade_date")),
-            )
+            params = {
+                "symbol": str(payload.get("symbol", "")),
+                "side": str(payload.get("side", "")),
+                "quantity": payload.get("quantity", ""),
+                "trigger_price": payload.get("trigger_price", ""),
+                "limit_price": payload.get("limit_price", ""),
+                "dry_run": bool(payload.get("dry_run", True)),
+                "expiry_date": _optional_text(payload.get("expiry_date")),
+                "trade_date": _optional_text(payload.get("trade_date")),
+            }
+            if broker_gateway.icici_enabled():
+                order = broker_gateway.call("icici.gtt_single", params).get("order", {})
+            else:
+                order = icici.place_gtt_single_leg_order(**params)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -598,11 +711,15 @@ def create_app() -> Flask:
     @_login_required
     def api_icici_gtt_book():
         try:
-            orders = icici.gtt_order_book(
-                exchange_code=str(request.args.get("exchange_code", "NSE")),
-                from_date=_optional_text(request.args.get("from_date")),
-                to_date=_optional_text(request.args.get("to_date")),
-            )
+            params = {
+                "exchange_code": str(request.args.get("exchange_code", "NSE")),
+                "from_date": _optional_text(request.args.get("from_date")),
+                "to_date": _optional_text(request.args.get("to_date")),
+            }
+            if broker_gateway.icici_enabled():
+                orders = broker_gateway.call("icici.gtt_book", params).get("orders", {})
+            else:
+                orders = icici.gtt_order_book(**params)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -801,6 +918,122 @@ def _valid_sync_token() -> bool:
     expected = os.getenv("EMA_SWING_SYNC_TOKEN", "").strip()
     supplied = str(request.headers.get("X-EMA-Swing-Sync-Token", "")).strip()
     return bool(expected and supplied and secrets.compare_digest(expected, supplied))
+
+
+def _valid_broker_gateway_token() -> bool:
+    expected = (
+        os.getenv("EMA_SWING_BROKER_GATEWAY_TOKEN", "").strip()
+        or os.getenv("EMA_SWING_SYNC_TOKEN", "").strip()
+    )
+    supplied = str(request.headers.get(broker_gateway.TOKEN_HEADER, "")).strip()
+    return bool(expected and supplied and secrets.compare_digest(expected, supplied))
+
+
+def _execute_broker_gateway_operation(operation: str, params: dict[str, Any]) -> dict[str, Any]:
+    if operation == "icici.credentials_status":
+        return {"credentials": icici.credentials_status()}
+    if operation == "icici.login_url":
+        return {"url": icici.login_url(str(params.get("api_key", "")))}
+    if operation == "icici.session":
+        api_key = str(params.get("api_key", "")).strip()
+        api_secret = str(params.get("api_secret", "")).strip()
+        session_token = str(params.get("session_token", "")).strip()
+        test = icici.test_session(
+            api_key=api_key,
+            api_secret=api_secret,
+            session_token=session_token,
+            stock_code=str(params.get("stock_code", "GOLDEX")),
+        )
+        icici.save_credentials(api_key=api_key, api_secret=api_secret, session_token=session_token)
+        return {"credentials": icici.credentials_status(), "test": test}
+    if operation == "icici.save":
+        icici.save_credentials(
+            api_key=str(params.get("api_key", "")),
+            api_secret=str(params.get("api_secret", "")),
+            session_token=str(params.get("session_token", "")),
+        )
+        return {"credentials": icici.credentials_status()}
+    if operation == "icici.connection":
+        test = icici.test_quote(stock_code=str(params.get("stock_code", "GOLDEX")))
+        return {"connected": bool(test.get("ok")), "test": test, "credentials": icici.credentials_status()}
+    if operation == "icici.test_quote":
+        return {"test": icici.test_quote(stock_code=str(params.get("stock_code", "GOLDEX")))}
+    if operation == "icici.limit_order":
+        return {
+            "order": icici.place_limit_order(
+                symbol=str(params.get("symbol", "")),
+                side=str(params.get("side", "")),
+                quantity=params.get("quantity"),
+                limit_price=params.get("limit_price"),
+                dry_run=bool(params.get("dry_run", True)),
+                product=str(params.get("product", "cash")),
+                validity=str(params.get("validity", "day")),
+                user_remark=str(params.get("user_remark", "emaswing")),
+            )
+        }
+    if operation == "icici.gtt_single":
+        return {
+            "order": icici.place_gtt_single_leg_order(
+                symbol=str(params.get("symbol", "")),
+                side=str(params.get("side", "")),
+                quantity=params.get("quantity"),
+                trigger_price=params.get("trigger_price"),
+                limit_price=params.get("limit_price"),
+                dry_run=bool(params.get("dry_run", True)),
+                expiry_date=_optional_text(params.get("expiry_date")),
+                trade_date=_optional_text(params.get("trade_date")),
+            )
+        }
+    if operation == "icici.gtt_book":
+        return {
+            "orders": icici.gtt_order_book(
+                exchange_code=str(params.get("exchange_code", "NSE")),
+                from_date=_optional_text(params.get("from_date")),
+                to_date=_optional_text(params.get("to_date")),
+            )
+        }
+    if operation == "icici.order_book":
+        return {
+            "orders": icici.order_book(
+                exchange_code=str(params.get("exchange_code", "NSE")),
+                from_date=_optional_text(params.get("from_date")),
+                to_date=_optional_text(params.get("to_date")),
+            )
+        }
+    if operation == "icici.portfolio":
+        payload = {
+            "funds": icici.funds(),
+            "demat_holdings": icici.demat_holdings(),
+            "portfolio_holdings": icici.portfolio_holdings(
+                exchange_code=str(params.get("exchange_code", "NSE")),
+                from_date=_optional_text(params.get("from_date")),
+                to_date=_optional_text(params.get("to_date")),
+                stock_code=str(params.get("stock_code", "")),
+                portfolio_type=str(params.get("portfolio_type", "")),
+            ),
+            "positions": icici.portfolio_positions(),
+        }
+        _save_broker_snapshot("icici", "portfolio", payload)
+        return payload
+    if operation == "icici.trades":
+        trades = icici.trade_book(
+            exchange_code=str(params.get("exchange_code", "NSE")),
+            from_date=_optional_text(params.get("from_date")),
+            to_date=_optional_text(params.get("to_date")),
+            product_type=str(params.get("product_type", "")),
+            action=str(params.get("action", "")),
+            stock_code=str(params.get("stock_code", "")),
+        )
+        _save_broker_snapshot("icici", "trades", {"trades": trades})
+        return {"trades": trades}
+    if operation == "icici.cancel_order":
+        return {
+            "cancel": icici.cancel_order(
+                exchange_code=str(params.get("exchange_code", "NSE")),
+                order_id=str(params.get("order_id", "")),
+            )
+        }
+    raise ValueError(f"Unsupported broker gateway operation: {operation}")
 
 
 def _load_live_state() -> dict[str, Any]:
