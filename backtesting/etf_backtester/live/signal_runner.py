@@ -151,19 +151,6 @@ def run_live_signals(
         price_note = "Selected-time intraday when available; daily cached data for missing intraday rows"
     if strict_price_time and price_time is not None:
         _require_selected_time_rows(etf_histories, symbols, run_day, price_time)
-    if use_current_price:
-        phase_started = perf_counter()
-        _overlay_current_price_rows_for_live(
-            etf_histories=etf_histories,
-            symbols=symbols,
-            external_histories=external_histories,
-            external_sources=external_sources,
-            run_day=run_day,
-        )
-        _record_timing(timings, "current_price_overlay", phase_started)
-        price_note = "Current market price"
-        price_time = None
-
     signal_histories = {**etf_histories, **external_histories}
     strategy = _strategy_from_config(config)
     phase_started = perf_counter()
@@ -187,6 +174,25 @@ def run_live_signals(
     if use_daily_close and not explicit_run_date:
         _require_fresh_daily_close_rows(latest_rows, signal_contexts, _expected_latest_daily_close_date(run_day))
     latest_signals = {symbol: int(context["event"]) for symbol, context in signal_contexts.items()}
+
+    if use_current_price:
+        phase_started = perf_counter()
+        _overlay_current_price_rows_for_live(
+            etf_histories=etf_histories,
+            symbols=symbols,
+            external_histories={},
+            external_sources=[],
+            run_day=run_day,
+        )
+        _record_timing(timings, "current_price_overlay", phase_started)
+        latest_rows = {
+            symbol: rows[-1]
+            for symbol, rows in etf_histories.items()
+            if rows and rows[-1]["date"] == run_day
+        }
+        price_note = "Current market price"
+        price_time = None
+
     ath_sources = sorted(set(signal_sources.values()))
     phase_started = perf_counter()
     ath_histories = fetch_max_close_history(ath_sources)
