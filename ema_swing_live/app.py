@@ -184,12 +184,17 @@ def create_app() -> Flask:
             if selected_action_ids is not None and not isinstance(selected_action_ids, list):
                 raise ValueError("selected_action_ids must be a list.")
 
-            price_mode = str(payload.get("price_mode", "current")).strip().lower()
+            price_mode = str(payload.get("price_mode", "daily_close")).strip().lower()
+            if price_mode in {"current", "current_price"}:
+                price_mode = "cmp"
+            if price_mode not in {"daily_close", "cmp"}:
+                raise ValueError("Unknown price mode.")
+            use_current_price = price_mode == "cmp"
             run = run_live_signals(
                 apply_actions=bool(payload.get("apply_actions", False)),
                 selected_action_ids=selected_action_ids,
-                use_current_price=price_mode == "current",
-                use_daily_close=price_mode == "daily_close",
+                use_current_price=use_current_price,
+                use_daily_close=not use_current_price,
             )
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
